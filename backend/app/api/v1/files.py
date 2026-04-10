@@ -13,6 +13,12 @@ _MAX_FILE_SIZE = 50 * 1024 * 1024
 
 @router.post("/files", status_code=201)
 async def upload_file(file: UploadFile, x_user_id: str = Header(...)):
+    import uuid as _uuid
+    try:
+        _uuid.UUID(x_user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="X-User-Id must be a valid UUID")
+
     data = await file.read()
     if len(data) > _MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large (max 50 MB)")

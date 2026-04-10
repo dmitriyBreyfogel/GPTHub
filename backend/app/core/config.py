@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     minio_endpoint: str = "minio:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = ""
-    minio_bucket: str = "ai-workspace"
+    minio_bucket: str = "gpthub"
 
     # Backend
     backend_host: str = "0.0.0.0"
