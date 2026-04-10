@@ -18,12 +18,21 @@ services:
       IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL}
       IMAGE_GENERATION_FALLBACK_MODEL: ${IMAGE_GENERATION_FALLBACK_MODEL}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      QDRANT_URL: ${QDRANT_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
     ports:
       - "${BACKEND_PORT}:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      minio:
         condition: service_started
     networks:
       - app
@@ -72,10 +81,35 @@ services:
     networks:
       - app
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - app
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - app
+
 volumes:
   openwebui-data:
   postgres-data:
   redis-data:
+  qdrant-data:
+  minio-data:
 
 networks:
   app:
