@@ -29,7 +29,10 @@ services:
       - app
 
   frontend:
-    image: ghcr.io/open-webui/open-webui:main
+    build:
+      context: ./frontend
+      args:
+        OPENWEBUI_IMAGE: ${OPENWEBUI_IMAGE}
     environment:
       OPENAI_API_BASE_URL: ${OPENWEBUI_API_BASE_URL}
       OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
