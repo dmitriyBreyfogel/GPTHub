@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.task_types import TaskType
 from app.providers.mws_gpt import ChatMessage, mws_client
+
+
+URL_PATTERN = re.compile(r"https?://[^\s<>)\"']+")
 
 
 @dataclass(frozen=True)
@@ -104,6 +108,17 @@ def _classify_by_mime(mime: str | None) -> TaskClassification | None:
     return None
 
 
+def _classify_by_text_shape(text: str) -> TaskClassification | None:
+    if URL_PATTERN.search(text):
+        return TaskClassification(
+            task_type=TaskType.WEB_PARSE,
+            routing_reason="В запросе найдена ссылка, выбран режим анализа веб-страницы.",
+            confidence=0.95,
+            method="text_shape",
+        )
+    return None
+
+
 def _extract_json_object(text: str) -> dict | None:
     text = text.strip()
     if not text:
@@ -153,6 +168,10 @@ class TaskClassifier:
         mime_result = _classify_by_mime(mime)
         if mime_result:
             return mime_result
+
+        text_shape_result = _classify_by_text_shape(text)
+        if text_shape_result:
+            return text_shape_result
 
         try:
             semantic = await self._classify_semantic(text)

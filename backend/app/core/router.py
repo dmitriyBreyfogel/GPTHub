@@ -6,7 +6,9 @@ from app.core.classifier import TaskClassification, TaskClassifier
 from app.core.config import settings
 from app.core.task_types import TaskType
 from app.strategies.base import ModelStrategy, StrategyRequest, StrategyResponse
+from app.strategies.search import SearchStrategy
 from app.strategies.text import TextStrategy
+from app.strategies.web_parse import WebParseStrategy
 
 
 AUTO_MODEL_ALIASES = {"auto", "gpthub-auto", "gpthub_auto", "automatic"}
@@ -165,4 +167,4 @@ class ModelRouter:
         return model_by_task.get(task_type, settings.default_text_model)
 
 
-model_router = ModelRouter(strategies=[TextStrategy()])
+model_router = ModelRouter(strategies=[TextStrategy(), SearchStrategy(), WebParseStrategy()])
