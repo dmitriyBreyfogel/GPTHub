@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # Infrastructure
     redis_url: str = "redis://redis:6379/0"
+    rabbitmq_url: str = "amqp://guest:guest@rabbitmq:5672//"
     qdrant_url: str = "http://qdrant:6333"
     postgres_dsn: str = "postgresql+asyncpg://postgres:change_me@postgres:5432/postgres"
 

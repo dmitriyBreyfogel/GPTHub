@@ -20,6 +20,7 @@ services:
       BACKEND_HOST: ${BACKEND_HOST}
       BACKEND_RELOAD: ${BACKEND_RELOAD}
       REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
       MWS_GPT_BASE_URL: ${MWS_GPT_BASE_URL}
       MWS_GPT_API_KEY: ${MWS_GPT_API_KEY}
       DEFAULT_TEXT_MODEL: ${DEFAULT_TEXT_MODEL}
@@ -47,6 +48,70 @@ services:
         condition: service_started
       minio:
         condition: service_started
+    networks:
+      - app
+
+  worker-high:
+    build:
+      context: ./backend
+    command: celery -A app.tasks.celery_app.celery_app worker -Q high -c 4 -l info
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      MWS_GPT_BASE_URL: ${MWS_GPT_BASE_URL}
+      MWS_GPT_API_KEY: ${MWS_GPT_API_KEY}
+      ASR_MODEL: ${ASR_MODEL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app
+
+  worker-low:
+    build:
+      context: ./backend
+    command: celery -A app.tasks.celery_app.celery_app worker -Q low -c 2 -l info
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      MWS_GPT_BASE_URL: ${MWS_GPT_BASE_URL}
+      MWS_GPT_API_KEY: ${MWS_GPT_API_KEY}
+      DEFAULT_TEXT_MODEL: ${DEFAULT_TEXT_MODEL}
+      IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL}
+      IMAGE_GENERATION_FALLBACK_MODEL: ${IMAGE_GENERATION_FALLBACK_MODEL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app
+
+  flower:
+    build:
+      context: ./backend
+    command: celery -A app.tasks.celery_app.celery_app flower --port=5555
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+    ports:
+      - "5555:5555"
+    depends_on:
+      - rabbitmq
     networks:
       - app
 
@@ -94,6 +159,24 @@ services:
     networks:
       - app
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app
+
   qdrant:
     image: qdrant/qdrant:latest
     ports:
@@ -121,6 +204,7 @@ volumes:
   openwebui-data:
   postgres-data:
   redis-data:
+  rabbitmq-data:
   qdrant-data:
   minio-data:
 
