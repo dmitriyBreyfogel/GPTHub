@@ -32,13 +32,21 @@ class MWSGPTClient:
         }
 
     @retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(3), reraise=True)
-    async def chat(self, messages: list[ChatMessage], model: str | None = None, temperature: float = 0.7) -> ChatResponse:
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        model: str | None = None,
+        temperature: float = 0.7,
+        generation_options: dict | None = None,
+    ) -> ChatResponse:
         model = model or settings.default_text_model
         payload = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [{"role": message.role, "content": message.content} for message in messages],
             "temperature": temperature,
         }
+        if generation_options:
+            payload.update(generation_options)
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(f"{self._base_url}/chat/completions", headers=self._headers, json=payload)
             resp.raise_for_status()
@@ -52,14 +60,23 @@ class MWSGPTClient:
                 completion_tokens=usage.get("completion_tokens", 0),
             )
 
-    async def chat_stream(self, messages: list[ChatMessage], model: str | None = None, temperature: float = 0.7) -> AsyncIterator[bytes]:
+    async def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        model: str | None = None,
+        temperature: float = 0.7,
+        generation_options: dict | None = None,
+    ) -> AsyncIterator[bytes]:
         model = model or settings.default_text_model
         payload = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [{"role": message.role, "content": message.content} for message in messages],
             "temperature": temperature,
             "stream": True,
         }
+        if generation_options:
+            payload.update(generation_options)
+            payload["stream"] = True
         async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream("POST", f"{self._base_url}/chat/completions", headers=self._headers, json=payload) as resp:
                 resp.raise_for_status()

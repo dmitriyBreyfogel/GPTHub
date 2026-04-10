@@ -27,6 +27,7 @@ class StrategyRequest:
     file_name: str | None = None
     file_content_type: str | None = None
     context_messages: list[dict] | None = None
+    generation_options: dict | None = None
 
 
 @dataclass
