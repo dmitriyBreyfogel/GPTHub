@@ -23,6 +23,10 @@ class IMemoryClient(Protocol):
 
 class Mem0Client:
     def __init__(self) -> None:
+        import os
+        os.environ["OPENAI_API_KEY"] = settings.mws_gpt_api_key
+        os.environ["OPENAI_BASE_URL"] = settings.mws_gpt_base_url
+
         from mem0 import Memory
         self._memory = Memory.from_config({
             "vector_store": {
@@ -32,16 +36,12 @@ class Mem0Client:
             "llm": {
                 "provider": "openai",
                 "config": {
-                    "api_key": settings.mws_gpt_api_key,
-                    "base_url": settings.mws_gpt_base_url,
                     "model": settings.default_text_model,
                 },
             },
             "embedder": {
                 "provider": "openai",
                 "config": {
-                    "api_key": settings.mws_gpt_api_key,
-                    "base_url": settings.mws_gpt_base_url,
                     "model": settings.embedding_model,
                 },
             },

@@ -111,7 +111,8 @@ services:
     ports:
       - "5555:5555"
     depends_on:
-      - rabbitmq
+      rabbitmq:
+        condition: service_healthy
     networks:
       - app
 
