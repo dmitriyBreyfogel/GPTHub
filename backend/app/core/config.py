@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Infrastructure
     redis_url: str = "redis://redis:6379/0"
     qdrant_url: str = "http://qdrant:6333"
+    postgres_dsn: str = "postgresql+asyncpg://postgres:change_me@postgres:5432/postgres"
 
     # MinIO
     minio_endpoint: str = "minio:9000"
