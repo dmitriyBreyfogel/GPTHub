@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://qdrant:6333"
     postgres_dsn: str = "postgresql+asyncpg://postgres:change_me@postgres:5432/postgres"
 
+    @property
+    def postgres_dsn_sync(self) -> str:
+        return self.postgres_dsn.replace("+asyncpg", "")
+
     # MinIO
     minio_endpoint: str = "minio:9000"
     minio_access_key: str = "minioadmin"

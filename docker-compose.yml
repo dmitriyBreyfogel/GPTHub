@@ -1,6 +1,18 @@
 name: ${COMPOSE_PROJECT_NAME}
 
 services:
+  migrate:
+    build:
+      context: ./backend
+    command: alembic upgrade head
+    environment:
+      POSTGRES_DSN: ${POSTGRES_DSN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app
+
   backend:
     build:
       context: ./backend
@@ -23,11 +35,12 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET: ${MINIO_BUCKET}
+      POSTGRES_DSN: ${POSTGRES_DSN}
     ports:
       - "${BACKEND_PORT}:8000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_started
       qdrant:
