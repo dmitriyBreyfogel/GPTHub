@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.health import router as health_router
 from app.api.v1.audio import router as audio_router
 from app.api.v1.chat import router as chat_router
+from app.api.v1.export import router as export_router
 from app.api.v1.files import router as files_router
 from app.api.v1.memory import router as memory_router
 from app.api.v1.models import router as models_router
@@ -49,3 +50,4 @@ app.include_router(files_router, prefix="/v1")
 app.include_router(tasks_router, prefix="/v1")
 app.include_router(workspaces_router, prefix="/v1")
 app.include_router(audio_router, prefix="/v1")
+app.include_router(export_router, prefix="/v1")
