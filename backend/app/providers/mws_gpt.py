@@ -92,13 +92,19 @@ class MWSGPTClient:
             return resp.json()["data"][0]["embedding"]
 
     @retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(3), reraise=True)
-    async def transcribe(self, audio_bytes: bytes, filename: str = "audio.wav") -> str:
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        filename: str = "audio.wav",
+        content_type: str = "audio/wav",
+        model: str | None = None,
+    ) -> str:
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
                 f"{self._base_url}/audio/transcriptions",
                 headers={"Authorization": f"Bearer {settings.mws_gpt_api_key}"},
-                files={"file": (filename, audio_bytes, "audio/wav")},
-                data={"model": settings.asr_model},
+                files={"file": (filename, audio_bytes, content_type)},
+                data={"model": model or settings.asr_model},
             )
             resp.raise_for_status()
             return resp.json()["text"]
