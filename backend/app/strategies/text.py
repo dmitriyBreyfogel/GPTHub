@@ -61,6 +61,7 @@ class TextStrategy:
         return prompt_cache_manager.build_text_system_prompt(
             profile_text=profile_text,
             memory_text=memory_text,
+            workspace_instructions=request.workspace_instructions,
         )
 
     async def _profile_text(self, user_id: str) -> str:
