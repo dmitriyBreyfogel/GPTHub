@@ -129,5 +129,22 @@ class MWSGPTClient:
             resp.raise_for_status()
             return resp.json()["data"][0]["url"]
 
+    @retry(wait=wait_exponential(multiplier=1, min=1, max=10), stop=stop_after_attempt(2), reraise=True)
+    async def tts(self, text: str, model: str | None = None, voice: str = "alloy", response_format: str = "mp3") -> bytes:
+        payload = {
+            "model": model or settings.tts_model,
+            "input": text,
+            "voice": voice,
+            "response_format": response_format,
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{self._base_url}/audio/speech",
+                headers=self._headers,
+                json=payload,
+            )
+            resp.raise_for_status()
+            return resp.content
+
 
 mws_client = MWSGPTClient()

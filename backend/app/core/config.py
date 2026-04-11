@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     image_generation_model: str = "sd3.5-large-image"
     image_generation_fallback_model: str = "sdxl-lightning-image"
     embedding_model: str = "bge-m3"
+    tts_model: str = "tts-1"
 
     # Infrastructure
     redis_url: str = "redis://redis:6379/0"
