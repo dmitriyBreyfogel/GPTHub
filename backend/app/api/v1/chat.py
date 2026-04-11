@@ -34,6 +34,68 @@ GENERATION_OPTION_KEYS = {
     "tool_choice",
 }
 
+CHAT_COMPLETIONS_OPENAPI_EXTRA = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "required": ["messages"],
+                    "additionalProperties": True,
+                    "properties": {
+                        "model": {"type": "string", "example": "gpt-4o-mini"},
+                        "workspace_id": {"type": "string", "format": "uuid"},
+                        "task_type": {"type": "string"},
+                        "stream": {"type": "boolean", "default": False},
+                        "temperature": {"type": "number"},
+                        "max_tokens": {"type": "integer"},
+                        "metadata": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        },
+                        "messages": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["role", "content"],
+                                "additionalProperties": True,
+                                "properties": {
+                                    "role": {
+                                        "type": "string",
+                                        "enum": ["system", "user", "assistant", "tool"],
+                                    },
+                                    "content": {
+                                        "oneOf": [
+                                            {"type": "string"},
+                                            {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object",
+                                                    "additionalProperties": True,
+                                                },
+                                            },
+                                        ],
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                "example": {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "Explain FastAPI router in simple terms",
+                        }
+                    ],
+                    "stream": False,
+                },
+            }
+        },
+    }
+}
+
 
 @dataclass(frozen=True)
 class RequestFile:
@@ -486,7 +548,7 @@ def _openai_stream_metadata(decision: RoutingDecision) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
-@router.post("/chat/completions")
+@router.post("/chat/completions", openapi_extra=CHAT_COMPLETIONS_OPENAPI_EXTRA)
 async def chat_completions(request: Request):
     body = await request.json()
     user_id = request.headers.get("x-user-id", "anonymous")
