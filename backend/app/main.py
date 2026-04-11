@@ -9,6 +9,7 @@ from app.api.v1.files import router as files_router
 from app.api.v1.memory import router as memory_router
 from app.api.v1.models import router as models_router
 from app.api.v1.tasks import router as tasks_router
+from app.api.v1.workspaces import router as workspaces_router
 from app.storage.db import engine, Base
 
 
@@ -45,3 +46,4 @@ app.include_router(models_router, prefix="/v1")
 app.include_router(memory_router, prefix="/v1")
 app.include_router(files_router, prefix="/v1")
 app.include_router(tasks_router, prefix="/v1")
+app.include_router(workspaces_router, prefix="/v1")
