@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     minio_secret_key: str = ""
     minio_bucket: str = "gpthub"
 
+    # Langfuse
+    langfuse_secret_key: str = ""
+    langfuse_public_key: str = ""
+    langfuse_host: str = "http://langfuse:3000"
+
     # Backend
     backend_host: str = "0.0.0.0"
     backend_reload: bool = False

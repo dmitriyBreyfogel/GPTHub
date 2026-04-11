@@ -7,11 +7,21 @@ from app.memory.profile import UserProfile, profile_repo
 router = APIRouter()
 
 
+class AddMemoryRequest(BaseModel):
+    messages: list[dict]
+
+
 class ProfileUpdateRequest(BaseModel):
     name: str = ""
     role: str = ""
     preferences: dict = {}
     core_facts: list[str] = []
+
+
+@router.post("/memory", status_code=201)
+async def add_memory(body: AddMemoryRequest, x_user_id: str = Header(...)):
+    await memory_client.add(messages=body.messages, user_id=x_user_id)
+    return {"status": "ok"}
 
 
 @router.get("/memory")

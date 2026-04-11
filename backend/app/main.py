@@ -14,6 +14,9 @@ from app.storage.db import engine, Base
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.observability import init_langfuse, flush_langfuse
+    init_langfuse()
+
     import app.memory.mem0_client as mem0_module
     from app.memory.mem0_client import Mem0Client
     mem0_module.memory_client = Mem0Client()
@@ -23,6 +26,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    flush_langfuse()
     await engine.dispose()
 
 

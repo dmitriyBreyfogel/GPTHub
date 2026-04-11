@@ -39,6 +39,7 @@ class MWSGPTClient:
         temperature: float = 0.7,
         generation_options: dict | None = None,
     ) -> ChatResponse:
+        from app.core.observability import get_langfuse
         model = model or settings.default_text_model
         payload = {
             "model": model,
@@ -47,18 +48,28 @@ class MWSGPTClient:
         }
         if generation_options:
             payload.update(generation_options)
+
+        lf = get_langfuse()
+        generation = lf.generation(name="chat", model=model, input=payload["messages"]) if lf else None
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(f"{self._base_url}/chat/completions", headers=self._headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
             choice = data["choices"][0]["message"]
             usage = data.get("usage", {})
-            return ChatResponse(
+            result = ChatResponse(
                 content=choice["content"],
                 model=data.get("model", model),
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
             )
+            if generation:
+                generation.end(
+                    output=result.content,
+                    usage={"input": result.prompt_tokens, "output": result.completion_tokens},
+                )
+            return result
 
     async def chat_stream(
         self,
