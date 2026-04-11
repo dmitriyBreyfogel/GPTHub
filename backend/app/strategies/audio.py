@@ -53,6 +53,8 @@ class AudioStrategy:
             model_override=settings.default_text_model,
             context_messages=self._text_context_messages(request, text),
             generation_options=request.generation_options,
+            workspace_id=request.workspace_id,
+            workspace_instructions=request.workspace_instructions,
         )
 
     def _text_context_messages(self, request: StrategyRequest, text: str) -> list[dict] | None:

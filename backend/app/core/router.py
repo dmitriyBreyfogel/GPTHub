@@ -127,6 +127,8 @@ class ModelRouter:
             file_content_type=request.file_content_type,
             context_messages=request.context_messages,
             generation_options=request.generation_options,
+            workspace_id=request.workspace_id,
+            workspace_instructions=request.workspace_instructions,
         )
         response = await decision.strategy.execute(routed_request)
         return self.enrich_response(decision, response)

@@ -8,9 +8,13 @@ from dataclasses import dataclass
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy import select
+
 from app.core.config import settings
 from app.core.router import RoutingDecision, model_router
+from app.storage.db import AsyncSessionLocal
 from app.storage.files import file_storage
+from app.storage.models import User, Workspace
 from app.strategies.base import StrategyRequest, StrategyResponse
 
 router = APIRouter()
@@ -36,6 +40,13 @@ class RequestFile:
     file_bytes: bytes | None = None
     file_name: str | None = None
     file_content_type: str | None = None
+
+
+@dataclass(frozen=True)
+class RequestWorkspace:
+    workspace_id: str | None = None
+    instructions: str = ""
+    model: str | None = None
 
 
 def _content_to_text(content) -> str:
@@ -80,6 +91,23 @@ def _task_type_override(body: dict) -> str | None:
             return metadata_task_type
 
     return None
+
+
+def _workspace_id(body: dict, header_workspace_id: str | None = None) -> str | None:
+    raw_workspace_id = (
+        _string_value(body.pop("workspace_id", None))
+        or _string_value(body.pop("workspaceId", None))
+    )
+    if raw_workspace_id:
+        return raw_workspace_id
+
+    metadata = body.get("metadata")
+    if isinstance(metadata, dict):
+        metadata_workspace_id = _string_value(metadata.get("workspace_id")) or _string_value(metadata.get("workspaceId"))
+        if metadata_workspace_id:
+            return metadata_workspace_id
+
+    return _string_value(header_workspace_id)
 
 
 def _routing_headers(decision: RoutingDecision) -> dict[str, str]:
@@ -327,12 +355,44 @@ async def _request_file(body: dict, user_id: str) -> RequestFile:
     )
 
 
+async def _request_workspace(body: dict, user_id: str, header_workspace_id: str | None = None) -> RequestWorkspace:
+    raw_workspace_id = _workspace_id(body, header_workspace_id)
+    if raw_workspace_id is None:
+        return RequestWorkspace()
+
+    try:
+        workspace_uuid = uuid.UUID(raw_workspace_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workspace_id")
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Workspace)
+            .join(User)
+            .where(
+                Workspace.id == workspace_uuid,
+                User.external_id == user_id,
+            )
+        )
+        workspace = result.scalar_one_or_none()
+
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    return RequestWorkspace(
+        workspace_id=str(workspace.id),
+        instructions=workspace.instructions or "",
+        model=_string_value(workspace.model),
+    )
+
+
 def _strategy_request(
     body: dict,
     decision: RoutingDecision,
     user_id: str,
     user_text: str,
     request_file: RequestFile,
+    request_workspace: RequestWorkspace,
 ) -> StrategyRequest:
     messages = body.get("messages")
     return StrategyRequest(
@@ -345,6 +405,8 @@ def _strategy_request(
         file_content_type=request_file.file_content_type,
         context_messages=messages if isinstance(messages, list) else None,
         generation_options={key: body[key] for key in GENERATION_OPTION_KEYS if key in body},
+        workspace_id=request_workspace.workspace_id,
+        workspace_instructions=request_workspace.instructions,
     )
 
 
@@ -430,17 +492,18 @@ async def chat_completions(request: Request):
     user_id = request.headers.get("x-user-id", "anonymous")
     user_text = _last_user_text(body)
     request_file = await _request_file(body, user_id)
+    request_workspace = await _request_workspace(body, user_id, request.headers.get("x-workspace-id"))
     decision = await model_router.route(
         user_text,
         user_id=user_id,
-        model_override=body.get("model"),
+        model_override=body.get("model") or request_workspace.model,
         task_type_override=_task_type_override(body),
         file_content_type=request_file.file_content_type,
         file_name=request_file.file_name,
     )
     body["model"] = decision.model
     routing_headers = _routing_headers(decision)
-    strategy_request = _strategy_request(body, decision, user_id, user_text, request_file)
+    strategy_request = _strategy_request(body, decision, user_id, user_text, request_file, request_workspace)
 
     async def stream_response():
         yield _openai_stream_metadata(decision)
