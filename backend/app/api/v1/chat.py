@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 
@@ -181,6 +181,13 @@ def _routing_headers(decision: RoutingDecision) -> dict[str, str]:
 
 
 def _exception_detail(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        detail = str(exc).strip()
+        response_text = exc.response.text.strip()
+        if response_text:
+            return f"{detail}: {response_text}"
+        if detail:
+            return detail
     detail = str(exc).strip()
     if detail:
         return detail
@@ -410,20 +417,61 @@ def _file_ref_from_container(container: object) -> tuple[str, str | None, str | 
     return None
 
 
+def _file_ref_from_known_value(value: object) -> tuple[str, str | None, str | None] | None:
+    if not isinstance(value, dict):
+        return None
+
+    file_ref = _file_ref_from_container(value)
+    if file_ref is not None:
+        return file_ref
+
+    for key in ("image_url", "input_audio", "file"):
+        nested_file_ref = _file_ref_from_known_value(value.get(key))
+        if nested_file_ref is not None:
+            return nested_file_ref
+
+    return None
+
+
+def _file_ref_from_messages(body: dict) -> tuple[str, str | None, str | None] | None:
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return None
+
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            file_ref = _file_ref_from_known_value(item)
+            if file_ref is not None:
+                return file_ref
+
+    return None
+
+
 async def _request_file(body: dict, user_id: str) -> RequestFile:
     inline_file = _inline_request_file(body)
     if inline_file is not None:
         return inline_file
 
-    file_ref = _file_ref_from_container(body.get("metadata")) or _file_ref_from_container(body)
+    file_ref = (
+        _file_ref_from_messages(body)
+        or _file_ref_from_container(body.get("metadata"))
+        or _file_ref_from_container(body)
+    )
     if file_ref is None:
         return RequestFile()
 
     file_id, file_name, content_type = file_ref
     try:
         data, stored_content_type = await file_storage.download(file_id=file_id, user_id=user_id)
-    except Exception:
-        return RequestFile(file_name=file_name, file_content_type=content_type)
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"File download failed: {_exception_detail(exc)}") from exc
 
     return RequestFile(
         file_bytes=data,
@@ -564,9 +612,9 @@ def _openai_stream_metadata(decision: RoutingDecision) -> bytes:
 
 
 @router.post("/chat/completions", openapi_extra=CHAT_COMPLETIONS_OPENAPI_EXTRA)
-async def chat_completions(request: Request):
+async def chat_completions(request: Request, x_user_id: str = Header("anonymous")):
     body = await request.json()
-    user_id = request.headers.get("x-user-id", "anonymous")
+    user_id = x_user_id
     user_text = _last_user_text(body)
     request_file = await _request_file(body, user_id)
     request_workspace = await _request_workspace(body, user_id, request.headers.get("x-workspace-id"))

@@ -3,8 +3,11 @@ from __future__ import annotations
 import base64
 from typing import AsyncIterator
 
+import httpx
+
+from app.core.config import settings
 from app.core.prompt_cache import prompt_cache_manager
-from app.providers.mws_gpt import ChatMessage, mws_client
+from app.providers.mws_gpt import ChatMessage, ChatResponse, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
 
@@ -13,11 +16,8 @@ class VisionStrategy:
 
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
         messages = self._build_messages(request)
-        response = await mws_client.chat(
-            messages,
-            model=request.model_override,
-            generation_options=request.generation_options,
-        )
+        model = request.model_override or settings.vision_model
+        response = await self._chat_with_fallback(messages, model, request.generation_options)
         return StrategyResponse(
             content=response.content,
             model_used=response.model,
@@ -27,12 +27,58 @@ class VisionStrategy:
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
         messages = self._build_messages(request)
-        async for chunk in mws_client.chat_stream(
-            messages,
-            model=request.model_override,
-            generation_options=request.generation_options,
-        ):
-            yield chunk
+        model = request.model_override or settings.vision_model
+        try:
+            async for chunk in mws_client.chat_stream(
+                messages,
+                model=model,
+                generation_options=request.generation_options,
+            ):
+                yield chunk
+        except httpx.HTTPStatusError as exc:
+            fallback_model = self._fallback_model(model, exc)
+            if fallback_model is None:
+                raise
+            async for chunk in mws_client.chat_stream(
+                messages,
+                model=fallback_model,
+                generation_options=request.generation_options,
+            ):
+                yield chunk
+
+    async def _chat_with_fallback(
+        self,
+        messages: list[ChatMessage],
+        model: str,
+        generation_options: dict | None,
+    ) -> ChatResponse:
+        try:
+            return await mws_client.chat(
+                messages,
+                model=model,
+                generation_options=generation_options,
+            )
+        except httpx.HTTPStatusError as exc:
+            fallback_model = self._fallback_model(model, exc)
+            if fallback_model is None:
+                raise
+            return await mws_client.chat(
+                messages,
+                model=fallback_model,
+                generation_options=generation_options,
+            )
+
+    def _fallback_model(self, model: str, exc: httpx.HTTPStatusError) -> str | None:
+        if exc.response.status_code in {401, 403} and not self._is_model_access_denied(exc):
+            return None
+        fallback_model = settings.vision_fallback_model
+        if not fallback_model or fallback_model.lower() == model.lower():
+            return None
+        return fallback_model
+
+    def _is_model_access_denied(self, exc: httpx.HTTPStatusError) -> bool:
+        response_text = exc.response.text.lower()
+        return "team_model_access_denied" in response_text or "not allowed to access model" in response_text
 
     def _build_messages(self, request: StrategyRequest) -> list[ChatMessage]:
         messages = [
