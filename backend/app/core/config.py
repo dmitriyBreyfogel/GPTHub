@@ -5,12 +5,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # MWS GPT
-    mws_gpt_base_url: str = "https://api.llmops.mts-corp.ru/v1"
+    mws_gpt_base_url: str = "https://api.gpt.mws.ru/v1"
     mws_gpt_api_key: str = ""
 
     # Models
-    default_text_model: str = "gpt-4o-mini"
-    fallback_text_model: str = "cotype-pro"
+    default_text_model: str = "qwen2.5-72b-instruct"
+    fallback_text_model: str = "mws-gpt-alpha"
     vision_model: str = "gpt-4o"
     vision_fallback_model: str = "qwen2.5-vl-32b-instruct-awq"
     asr_model: str = "whisper-turbo-local-preview"

@@ -180,6 +180,21 @@ def _routing_headers(decision: RoutingDecision) -> dict[str, str]:
     }
 
 
+def _exception_detail(exc: Exception) -> str:
+    detail = str(exc).strip()
+    if detail:
+        return detail
+    cause = exc.__cause__ or exc.__context__
+    if cause is not None:
+        cause_detail = str(cause).strip() or repr(cause)
+        if cause_detail:
+            return f"{exc.__class__.__name__}: {cause_detail}"
+    repr_detail = repr(exc)
+    if repr_detail:
+        return repr_detail
+    return exc.__class__.__name__
+
+
 def _decode_base64(value: str) -> bytes | None:
     try:
         return base64.b64decode("".join(value.split()), validate=True)
@@ -604,8 +619,10 @@ async def chat_completions(request: Request):
             strategy_response = await decision.strategy.execute(strategy_request)
             strategy_response = model_router.enrich_response(decision, strategy_response)
             return JSONResponse(content=_openai_response(strategy_response), headers=routing_headers)
+        except HTTPException:
+            raise
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=str(exc))
+            raise HTTPException(status_code=502, detail=_exception_detail(exc))
 
     if is_streaming:
         return StreamingResponse(stream_response(), media_type="text/event-stream", headers=routing_headers)
@@ -627,4 +644,4 @@ async def chat_completions(request: Request):
                 content["gpthub"] = _gpthub_metadata_from_decision(decision)
             return JSONResponse(content=content, headers=routing_headers)
         except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=str(exc))
+            raise HTTPException(status_code=502, detail=_exception_detail(exc))
