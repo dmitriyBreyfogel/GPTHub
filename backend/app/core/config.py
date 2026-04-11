@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     # Models
     default_text_model: str = "qwen2.5-72b-instruct"
     fallback_text_model: str = "mws-gpt-alpha"
-    vision_model: str = "gpt-4o"
-    vision_fallback_model: str = "qwen2.5-vl-32b-instruct-awq"
-    asr_model: str = "whisper-turbo-local-preview"
+    vision_model: str = "qwen2.5-vl-72b"
+    vision_fallback_model: str = "qwen3-vl-30b-a3b-instruct"
+    asr_model: str = "whisper-turbo-local"
     image_generation_model: str = "qwen-image-lightning"
     image_generation_fallback_model: str = "qwen-image"
     embedding_model: str = "bge-m3"
