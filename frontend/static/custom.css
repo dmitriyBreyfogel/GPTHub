@@ -1,41 +1,104 @@
 :root {
-    --gpthub-accent: #6366f1;
-    --gpthub-accent-hover: #4f46e5;
-    --gpthub-accent-subtle: rgba(99, 102, 241, 0.12);
-    --gpthub-badge-bg: rgba(99, 102, 241, 0.15);
-    --gpthub-badge-border: rgba(99, 102, 241, 0.35);
-    --gpthub-badge-text: #a5b4fc;
-    --gpthub-surface: rgba(30, 30, 46, 0.95);
-    --gpthub-border: rgba(255, 255, 255, 0.10);
-    --gpthub-tts-size: 28px;
+    --mts-red: #E30611;
+    --mts-red-hover: #c00510;
+    --mts-red-subtle: rgba(227, 6, 17, 0.12);
+    --mts-red-border: rgba(227, 6, 17, 0.35);
+    --mts-black: #0a0a0a;
+    --mts-surface: #1a1a1a;
+    --mts-surface2: #242424;
+    --mts-border: rgba(255, 255, 255, 0.10);
+    --mts-text: #f0f0f0;
+    --mts-text-muted: #888;
+    --mts-tts-size: 28px;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--gpthub-accent) !important;
+    background: var(--mts-red) !important;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline-color: var(--mts-red) !important;
+    ring-color: var(--mts-red) !important;
+}
+
+[class*="ring-blue"],
+[class*="border-blue"],
+[class*="bg-blue"] {
+    --tw-ring-color: var(--mts-red) !important;
+    border-color: var(--mts-red) !important;
+}
+
+.bg-white.dark\:bg-gray-850,
+[class*="chat-input"],
+#chat-textarea,
+textarea[id*="chat"] {
+    border-color: rgba(227, 6, 17, 0.3) !important;
+}
+
+textarea:focus,
+div[contenteditable]:focus {
+    border-color: var(--mts-red) !important;
+    box-shadow: 0 0 0 2px rgba(227, 6, 17, 0.15) !important;
+}
+
+[class*="scrollbar"]::-webkit-scrollbar-thumb,
+[class*="overflow"]::-webkit-scrollbar-thumb {
+    background-color: var(--mts-red) !important;
+    border-radius: 4px;
+}
+
+.dark [class*="hover\\:bg-gray-100"]:hover,
+[class*="hover\\:bg-gray-100"]:hover {
+    background-color: rgba(227, 6, 17, 0.08) !important;
+}
+
+[class*="bg-blue-500"],
+[class*="bg-blue-600"],
+[class*="bg-blue-700"] {
+    background-color: var(--mts-red) !important;
+}
+
+[class*="text-blue-500"],
+[class*="text-blue-600"] {
+    color: var(--mts-red) !important;
+}
+
+button[class*="bg-black"]:hover,
+button[class*="dark:bg-white"]:hover {
+    opacity: 0.85;
+}
+
+#sidebar-workspace-button,
+a[href="/workspace"] {
+    display: none !important;
 }
 
 .gpthub-indicator {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: var(--gpthub-badge-bg);
-    border: 1px solid var(--gpthub-badge-border);
-    border-radius: 6px;
-    padding: 4px 10px;
-    font-size: 11.5px;
+    background: rgba(227, 6, 17, 0.10);
+    border: 1px solid var(--mts-red-border);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 11px;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    color: var(--gpthub-badge-text);
+    color: #ff6b6b;
     margin-bottom: 10px;
     max-width: fit-content;
     line-height: 1.4;
+    letter-spacing: 0.2px;
 }
 
 .gpthub-indicator::before {
     content: '';
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
-    background: var(--gpthub-accent);
+    background: var(--mts-red);
     flex-shrink: 0;
 }
 
@@ -43,34 +106,34 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--gpthub-tts-size);
-    height: var(--gpthub-tts-size);
-    border-radius: 6px;
-    border: 1px solid var(--gpthub-border);
+    width: var(--mts-tts-size);
+    height: var(--mts-tts-size);
+    border-radius: 4px;
+    border: 1px solid var(--mts-border);
     background: transparent;
     cursor: pointer;
-    color: #94a3b8;
+    color: var(--mts-text-muted);
     transition: color 0.15s, border-color 0.15s, background 0.15s;
     flex-shrink: 0;
     padding: 0;
 }
 
 .gpthub-tts:hover {
-    color: var(--gpthub-accent);
-    border-color: var(--gpthub-accent);
-    background: var(--gpthub-accent-subtle);
+    color: var(--mts-red);
+    border-color: var(--mts-red);
+    background: var(--mts-red-subtle);
 }
 
 .gpthub-tts.active {
-    color: var(--gpthub-accent);
-    border-color: var(--gpthub-accent);
-    background: var(--gpthub-accent-subtle);
-    animation: gpthub-pulse 1.5s infinite;
+    color: var(--mts-red);
+    border-color: var(--mts-red);
+    background: var(--mts-red-subtle);
+    animation: mts-pulse 1.5s infinite;
 }
 
-@keyframes gpthub-pulse {
+@keyframes mts-pulse {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
+    50% { opacity: 0.5; }
 }
 
 #gpthub-panel {
@@ -81,51 +144,61 @@
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
-    background: var(--gpthub-surface);
-    border: 1px solid var(--gpthub-border);
-    border-radius: 12px;
-    padding: 8px 12px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(12px);
+    gap: 6px;
+    background: var(--mts-surface);
+    border: 1px solid var(--mts-border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255,255,255,0.04);
+}
+
+#gpthub-panel::before {
+    content: '';
+    display: block;
+    width: 3px;
+    height: 20px;
+    background: var(--mts-red);
+    border-radius: 2px;
+    flex-shrink: 0;
 }
 
 #gpthub-ws-select {
     background: transparent;
-    border: 1px solid var(--gpthub-border);
-    border-radius: 7px;
-    color: #cbd5e1;
+    border: 1px solid var(--mts-border);
+    border-radius: 4px;
+    color: var(--mts-text);
     font-size: 12px;
-    padding: 5px 28px 5px 8px;
+    padding: 4px 24px 4px 8px;
     cursor: pointer;
     outline: none;
     appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23E30611' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: right 8px center;
-    max-width: 160px;
+    background-position: right 7px center;
+    background-color: transparent;
+    max-width: 140px;
     transition: border-color 0.15s;
 }
 
 #gpthub-ws-select:hover,
 #gpthub-ws-select:focus {
-    border-color: var(--gpthub-accent);
+    border-color: var(--mts-red);
 }
 
 #gpthub-ws-select option {
-    background: #1e1e2e;
-    color: #cbd5e1;
+    background: #1a1a1a;
+    color: var(--mts-text);
 }
 
 #gpthub-mem-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 10px;
+    gap: 5px;
+    padding: 4px 10px;
     background: transparent;
-    border: 1px solid var(--gpthub-border);
-    border-radius: 7px;
-    color: #94a3b8;
+    border: 1px solid var(--mts-border);
+    border-radius: 4px;
+    color: var(--mts-text-muted);
     font-size: 12px;
     cursor: pointer;
     transition: color 0.15s, border-color 0.15s;
@@ -133,8 +206,8 @@
 }
 
 #gpthub-mem-btn:hover {
-    color: var(--gpthub-accent);
-    border-color: var(--gpthub-accent);
+    color: var(--mts-red);
+    border-color: var(--mts-red);
 }
 
 #gpthub-memory-modal {
@@ -142,8 +215,8 @@
     position: fixed;
     inset: 0;
     z-index: 10001;
-    background: rgba(0, 0, 0, 0.65);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(6px);
     align-items: center;
     justify-content: center;
 }
@@ -153,32 +226,35 @@
 }
 
 #gpthub-memory-panel {
-    background: #1e1e2e;
-    border: 1px solid var(--gpthub-border);
-    border-radius: 14px;
+    background: var(--mts-surface);
+    border: 1px solid var(--mts-border);
+    border-top: 3px solid var(--mts-red);
+    border-radius: 6px;
     width: 520px;
     max-width: calc(100vw - 32px);
     max-height: 80vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
 #gpthub-memory-panel header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--gpthub-border);
-    font-size: 15px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--mts-border);
+    font-size: 14px;
     font-weight: 600;
-    color: #f1f5f9;
+    color: var(--mts-text);
+    letter-spacing: 0.3px;
 }
 
 #gpthub-memory-panel header button {
     background: none;
     border: none;
-    color: #64748b;
+    color: var(--mts-text-muted);
     cursor: pointer;
     font-size: 20px;
     line-height: 1;
@@ -187,7 +263,7 @@
 }
 
 #gpthub-memory-panel header button:hover {
-    color: #f1f5f9;
+    color: var(--mts-red);
 }
 
 #gpthub-memory-list {
@@ -203,12 +279,13 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--gpthub-border);
-    border-radius: 8px;
+    background: var(--mts-surface2);
+    border: 1px solid var(--mts-border);
+    border-left: 2px solid var(--mts-red);
+    border-radius: 4px;
     padding: 10px 12px;
     font-size: 13px;
-    color: #cbd5e1;
+    color: #ccc;
     line-height: 1.5;
 }
 
@@ -220,7 +297,7 @@
     background: none;
     border: none;
     cursor: pointer;
-    color: #64748b;
+    color: var(--mts-text-muted);
     font-size: 15px;
     padding: 0;
     flex-shrink: 0;
@@ -229,12 +306,12 @@
 }
 
 .gpthub-memory-del:hover {
-    color: #f87171;
+    color: var(--mts-red);
 }
 
 #gpthub-memory-empty {
-    color: #475569;
+    color: var(--mts-text-muted);
     font-size: 13px;
     text-align: center;
-    padding: 24px 0;
+    padding: 32px 0;
 }

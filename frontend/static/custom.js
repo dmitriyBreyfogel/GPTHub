@@ -32,6 +32,17 @@
         };
     }
 
+    function cleanBranding(root) {
+        (root || document).querySelectorAll('*').forEach(function (el) {
+            if (el.childElementCount > 0) return;
+            el.childNodes.forEach(function (node) {
+                if (node.nodeType === 3 && node.textContent.includes(' (Open WebUI)')) {
+                    node.textContent = node.textContent.replace(/ \(Open WebUI\)/g, '');
+                }
+            });
+        });
+    }
+
     function buildPanel() {
         if (document.getElementById('gpthub-panel')) return;
 
@@ -42,7 +53,7 @@
         ws.id = 'gpthub-ws-select';
         var def = document.createElement('option');
         def.value = '';
-        def.textContent = 'Workspace';
+        def.textContent = 'Проект';
         ws.appendChild(def);
 
         apiFetch('/v1/workspaces')
@@ -63,7 +74,7 @@
 
         var memBtn = document.createElement('button');
         memBtn.id = 'gpthub-mem-btn';
-        memBtn.textContent = 'Memory';
+        memBtn.textContent = 'Память';
         memBtn.addEventListener('click', openMemoryModal);
 
         panel.appendChild(ws);
@@ -77,8 +88,8 @@
         modal.id = 'gpthub-memory-modal';
         modal.innerHTML = [
             '<div id="gpthub-memory-panel">',
-            '<header><span>Memory</span><button id="gpthub-mem-close">&times;</button></header>',
-            '<div id="gpthub-memory-list"><div id="gpthub-memory-empty">Loading...</div></div>',
+            '<header><span>Память</span><button id="gpthub-mem-close">&times;</button></header>',
+            '<div id="gpthub-memory-list"><div id="gpthub-memory-empty">Загрузка...</div></div>',
             '</div>'
         ].join('');
         document.body.appendChild(modal);
@@ -100,13 +111,13 @@
     function loadMemories() {
         var list = document.getElementById('gpthub-memory-list');
         if (!list) return;
-        list.innerHTML = '<div id="gpthub-memory-empty">Loading...</div>';
+        list.innerHTML = '<div id="gpthub-memory-empty">Загрузка...</div>';
         apiFetch('/v1/memory')
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 var items = data.memories || [];
                 if (!items.length) {
-                    list.innerHTML = '<div id="gpthub-memory-empty">No memories yet</div>';
+                    list.innerHTML = '<div id="gpthub-memory-empty">Воспоминания отсутствуют</div>';
                     return;
                 }
                 list.innerHTML = '';
@@ -129,7 +140,7 @@
                 });
             })
             .catch(function () {
-                list.innerHTML = '<div id="gpthub-memory-empty">Error loading</div>';
+                list.innerHTML = '<div id="gpthub-memory-empty">Ошибка загрузки</div>';
             });
     }
 
@@ -151,7 +162,7 @@
 
         var btn = document.createElement('button');
         btn.className = 'gpthub-tts';
-        btn.title = 'Read aloud';
+        btn.title = 'Озвучить';
         btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>';
 
         btn.addEventListener('click', function () {
@@ -188,6 +199,7 @@
     }
 
     function processNodes(root) {
+        cleanBranding(root);
         root.querySelectorAll('code').forEach(transformIndicator);
         ['[data-role="assistant"]', '[class*="assistant"]', '[class*="response"]'].forEach(function (sel) {
             root.querySelectorAll(sel).forEach(addTtsButton);
@@ -197,6 +209,7 @@
     function init() {
         patchFetch();
         buildPanel();
+        cleanBranding(document);
         processNodes(document.body);
 
         var observer = new MutationObserver(function (mutations) {
