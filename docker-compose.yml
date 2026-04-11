@@ -30,9 +30,6 @@ services:
   backend:
     build:
       context: ./backend
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     environment:
       BACKEND_HOST: ${BACKEND_HOST}
       BACKEND_RELOAD: ${BACKEND_RELOAD}
@@ -84,9 +81,6 @@ services:
     build:
       context: ./backend
     command: celery -A app.tasks.celery_app.celery_app worker -Q high -c 4 -l info
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     environment:
       REDIS_URL: ${REDIS_URL}
       RABBITMQ_URL: ${RABBITMQ_URL}
@@ -111,9 +105,6 @@ services:
     build:
       context: ./backend
     command: celery -A app.tasks.celery_app.celery_app worker -Q low -c 2 -l info
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
     environment:
       REDIS_URL: ${REDIS_URL}
       RABBITMQ_URL: ${RABBITMQ_URL}
@@ -168,7 +159,7 @@ services:
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
       WEBUI_NAME: GPTHub
       WEBUI_URL: http://localhost
-      DEFAULT_MODELS: gpt-4o-mini
+      DEFAULT_MODELS: ${DEFAULT_TEXT_MODEL}
       ENABLE_SIGNUP: "${ENABLE_SIGNUP:-true}"
       SHOW_CHANGELOG: "false"
       ENABLE_COMMUNITY_SHARING: "false"
