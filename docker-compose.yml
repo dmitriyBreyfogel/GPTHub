@@ -177,7 +177,7 @@ services:
       - app
 
   langfuse:
-    image: langfuse/langfuse:latest
+    image: langfuse/langfuse:2
     environment:
       DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD}@langfuse-postgres:5432/langfuse
       NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT}
