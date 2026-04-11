@@ -10,7 +10,6 @@ class Tools:
         self.valves = self.Valves()
 
     def get_memories(self, __user__: dict = {}) -> str:
-        """Get all memories stored about the user"""
         user_id = __user__.get("id", "anonymous")
         try:
             resp = httpx.get(
@@ -31,7 +30,6 @@ class Tools:
             return f"Ошибка при получении воспоминаний: {e}"
 
     def delete_memory(self, memory_id: str, __user__: dict = {}) -> str:
-        """Delete a specific memory by ID"""
         user_id = __user__.get("id", "anonymous")
         try:
             resp = httpx.delete(
@@ -45,7 +43,6 @@ class Tools:
             return f"Ошибка при удалении: {e}"
 
     def add_memory(self, text: str, __user__: dict = {}) -> str:
-        """Save a new memory explicitly requested by the user"""
         user_id = __user__.get("id", "anonymous")
         try:
             resp = httpx.post(
