@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
+from app.api.v1.analytics import router as analytics_router
 from app.api.v1.audio import router as audio_router
 from app.api.v1.chat import router as chat_router
 from app.api.v1.export import router as export_router
@@ -51,3 +52,4 @@ app.include_router(tasks_router, prefix="/v1")
 app.include_router(workspaces_router, prefix="/v1")
 app.include_router(audio_router, prefix="/v1")
 app.include_router(export_router, prefix="/v1")
+app.include_router(analytics_router, prefix="/v1")
