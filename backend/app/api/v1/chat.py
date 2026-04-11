@@ -348,7 +348,7 @@ def _strategy_request(
 
 
 def _openai_response(response: StrategyResponse) -> dict:
-    return {
+    payload = {
         "id": f"chatcmpl-{uuid.uuid4().hex}",
         "object": "chat.completion",
         "created": int(time.time()),
@@ -369,6 +369,13 @@ def _openai_response(response: StrategyResponse) -> dict:
             "total_tokens": 0,
         },
     }
+    if response.task_id:
+        payload["gpthub"] = {
+            "task_id": response.task_id,
+            "status_url": response.status_url,
+            "task_type": response.task_type.value,
+        }
+    return payload
 
 
 @router.post("/chat/completions")

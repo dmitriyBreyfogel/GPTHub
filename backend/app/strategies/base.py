@@ -39,6 +39,8 @@ class StrategyResponse:
     image_url: str | None = None
     file_url: str | None = None
     sources: list[str] | None = None
+    task_id: str | None = None
+    status_url: str | None = None
 
 
 @runtime_checkable

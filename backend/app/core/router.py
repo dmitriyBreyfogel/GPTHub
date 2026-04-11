@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.task_types import TaskType
 from app.strategies.base import ModelStrategy, StrategyRequest, StrategyResponse
 from app.strategies.audio import AudioStrategy
+from app.strategies.image_gen import ImageGenStrategy
 from app.strategies.search import SearchStrategy
 from app.strategies.text import TextStrategy
 from app.strategies.vision import VisionStrategy
@@ -170,5 +171,12 @@ class ModelRouter:
 
 
 model_router = ModelRouter(
-    strategies=[TextStrategy(), SearchStrategy(), WebParseStrategy(), VisionStrategy(), AudioStrategy()]
+    strategies=[
+        TextStrategy(),
+        SearchStrategy(),
+        WebParseStrategy(),
+        VisionStrategy(),
+        AudioStrategy(),
+        ImageGenStrategy(),
+    ]
 )
