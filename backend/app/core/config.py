@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     vision_model: str = "gpt-4o"
     vision_fallback_model: str = "qwen2.5-vl-32b-instruct-awq"
     asr_model: str = "whisper-turbo-local-preview"
-    image_generation_model: str = "sd3.5-large-image"
-    image_generation_fallback_model: str = "sdxl-lightning-image"
+    image_generation_model: str = "qwen-image-lightning"
+    image_generation_fallback_model: str = "qwen-image"
     embedding_model: str = "bge-m3"
     tts_model: str = "tts-1"
 
