@@ -10,6 +10,7 @@ from app.strategies.audio import AudioStrategy
 from app.strategies.deep_research import DeepResearchStrategy
 from app.strategies.file_qa import FileQAStrategy
 from app.strategies.image_gen import ImageGenStrategy
+from app.strategies.presentation import PresentationStrategy
 from app.strategies.search import SearchStrategy
 from app.strategies.text import TextStrategy
 from app.strategies.vision import VisionStrategy
@@ -204,5 +205,6 @@ model_router = ModelRouter(
         ImageGenStrategy(),
         FileQAStrategy(),
         DeepResearchStrategy(),
+        PresentationStrategy(),
     ]
 )

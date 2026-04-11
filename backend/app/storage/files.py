@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
 from app.storage.db import AsyncSessionLocal
-from app.storage.models import File
+from app.storage.models import File, User
 
 
 @dataclass
@@ -61,9 +61,10 @@ class MinIOFileStorage:
         )
 
         async with AsyncSessionLocal() as session:
+            db_user_id = await self._ensure_user_id(session, user_id)
             stmt = pg_insert(File).values(
                 id=uuid.UUID(file_id),
-                user_id=uuid.UUID(user_id) if _is_uuid(user_id) else None,
+                user_id=db_user_id,
                 filename=filename,
                 content_type=content_type,
                 size_bytes=size,
@@ -83,10 +84,14 @@ class MinIOFileStorage:
 
     async def download(self, file_id: str, user_id: str) -> tuple[bytes, str]:
         async with AsyncSessionLocal() as session:
+            db_user_id = await self._get_user_id(session, user_id)
+            if db_user_id is None:
+                raise PermissionError(f"File {file_id} not found for user {user_id}")
+
             result = await session.execute(
                 select(File).where(
                     File.id == uuid.UUID(file_id),
-                    File.user_id == uuid.UUID(user_id),
+                    File.user_id == db_user_id,
                 )
             )
             file_row = result.scalar_one_or_none()
@@ -100,10 +105,14 @@ class MinIOFileStorage:
 
     async def delete(self, file_id: str, user_id: str) -> None:
         async with AsyncSessionLocal() as session:
+            db_user_id = await self._get_user_id(session, user_id)
+            if db_user_id is None:
+                raise PermissionError(f"File {file_id} not found for user {user_id}")
+
             result = await session.execute(
                 select(File).where(
                     File.id == uuid.UUID(file_id),
-                    File.user_id == uuid.UUID(user_id),
+                    File.user_id == db_user_id,
                 )
             )
             file_row = result.scalar_one_or_none()
@@ -115,13 +124,19 @@ class MinIOFileStorage:
             await session.delete(file_row)
             await session.commit()
 
+    async def _ensure_user_id(self, session, external_id: str) -> uuid.UUID:
+        stmt = (
+            pg_insert(User)
+            .values(external_id=external_id)
+            .on_conflict_do_nothing(index_elements=["external_id"])
+        )
+        await session.execute(stmt)
+        result = await session.execute(select(User.id).where(User.external_id == external_id))
+        return result.scalar_one()
 
-def _is_uuid(value: str) -> bool:
-    try:
-        uuid.UUID(value)
-        return True
-    except ValueError:
-        return False
+    async def _get_user_id(self, session, external_id: str) -> uuid.UUID | None:
+        result = await session.execute(select(User.id).where(User.external_id == external_id))
+        return result.scalar_one_or_none()
 
 
 assert isinstance(MinIOFileStorage(), IFileStorage)
