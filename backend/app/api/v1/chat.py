@@ -1,5 +1,6 @@
 import base64
 import binascii
+import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -347,6 +348,38 @@ def _strategy_request(
     )
 
 
+def _gpthub_metadata_from_decision(decision: RoutingDecision) -> dict:
+    return {
+        "task_type": decision.task_type.value,
+        "model": decision.model,
+        "routing_reason": decision.strategy_routing_reason(""),
+        "routing_method": decision.method,
+        "routing_confidence": decision.confidence,
+        "manual_override": decision.manual_override,
+    }
+
+
+def _gpthub_metadata_from_response(response: StrategyResponse) -> dict:
+    gpthub = {
+        "task_type": response.task_type.value,
+        "model": response.model_used,
+        "routing_reason": response.routing_reason,
+        "routing_method": response.routing_method,
+        "routing_confidence": response.routing_confidence,
+        "manual_override": response.manual_override,
+    }
+    if response.task_id:
+        gpthub["task_id"] = response.task_id
+        gpthub["status_url"] = response.status_url
+    if response.image_url:
+        gpthub["image_url"] = response.image_url
+    if response.file_url:
+        gpthub["file_url"] = response.file_url
+    if response.sources:
+        gpthub["sources"] = response.sources
+    return gpthub
+
+
 def _openai_response(response: StrategyResponse) -> dict:
     payload = {
         "id": f"chatcmpl-{uuid.uuid4().hex}",
@@ -368,14 +401,27 @@ def _openai_response(response: StrategyResponse) -> dict:
             "completion_tokens": 0,
             "total_tokens": 0,
         },
+        "gpthub": _gpthub_metadata_from_response(response),
     }
-    if response.task_id:
-        payload["gpthub"] = {
-            "task_id": response.task_id,
-            "status_url": response.status_url,
-            "task_type": response.task_type.value,
-        }
     return payload
+
+
+def _openai_stream_metadata(decision: RoutingDecision) -> bytes:
+    payload = {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": decision.model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {},
+                "finish_reason": None,
+            }
+        ],
+        "gpthub": _gpthub_metadata_from_decision(decision),
+    }
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
 @router.post("/chat/completions")
@@ -397,6 +443,7 @@ async def chat_completions(request: Request):
     strategy_request = _strategy_request(body, decision, user_id, user_text, request_file)
 
     async def stream_response():
+        yield _openai_stream_metadata(decision)
         async with httpx.AsyncClient() as client:
             async with client.stream(
                 "POST",
@@ -414,17 +461,23 @@ async def chat_completions(request: Request):
                 async for chunk in resp.aiter_bytes():
                     yield chunk
 
+    async def strategy_stream_response():
+        yield _openai_stream_metadata(decision)
+        async for chunk in decision.strategy.stream(strategy_request):
+            yield chunk
+
     is_streaming = body.get("stream", False)
 
     if decision.strategy is not None:
         if is_streaming:
             return StreamingResponse(
-                decision.strategy.stream(strategy_request),
+                strategy_stream_response(),
                 media_type="text/event-stream",
                 headers=routing_headers,
             )
         try:
             strategy_response = await decision.strategy.execute(strategy_request)
+            strategy_response = model_router.enrich_response(decision, strategy_response)
             return JSONResponse(content=_openai_response(strategy_response), headers=routing_headers)
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc))
@@ -444,6 +497,9 @@ async def chat_completions(request: Request):
                 timeout=60.0,
             )
             resp.raise_for_status()
-            return JSONResponse(content=resp.json(), headers=routing_headers)
+            content = resp.json()
+            if isinstance(content, dict):
+                content["gpthub"] = _gpthub_metadata_from_decision(decision)
+            return JSONResponse(content=content, headers=routing_headers)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=str(exc))

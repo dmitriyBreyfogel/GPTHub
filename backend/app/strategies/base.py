@@ -41,6 +41,9 @@ class StrategyResponse:
     sources: list[str] | None = None
     task_id: str | None = None
     status_url: str | None = None
+    routing_method: str | None = None
+    routing_confidence: float | None = None
+    manual_override: bool | None = None
 
 
 @runtime_checkable

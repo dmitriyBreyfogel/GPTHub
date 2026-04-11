@@ -28,6 +28,20 @@ class RoutingDecision:
     method: str
     manual_override: bool
 
+    def strategy_routing_reason(self, strategy_reason: str) -> str:
+        parts = [
+            f"Выбрана стратегия `{self.task_type.value}`.",
+            f"Модель: `{self.model}`.",
+            f"Метод маршрутизации: `{self.method}`.",
+            f"Уверенность: {self.confidence:.2f}.",
+            f"Причина выбора: {self.routing_reason}",
+        ]
+        if self.manual_override:
+            parts.append("Источник выбора: ручной override.")
+        if strategy_reason:
+            parts.append(f"Детали стратегии: {strategy_reason}")
+        return " ".join(parts)
+
 
 class ModelRouter:
     def __init__(
@@ -112,7 +126,15 @@ class ModelRouter:
             context_messages=request.context_messages,
             generation_options=request.generation_options,
         )
-        return await decision.strategy.execute(routed_request)
+        response = await decision.strategy.execute(routed_request)
+        return self.enrich_response(decision, response)
+
+    def enrich_response(self, decision: RoutingDecision, response: StrategyResponse) -> StrategyResponse:
+        response.routing_reason = decision.strategy_routing_reason(response.routing_reason)
+        response.routing_method = decision.method
+        response.routing_confidence = decision.confidence
+        response.manual_override = decision.manual_override
+        return response
 
     def _decision_from_classification(self, classification: TaskClassification, selected_model: str) -> RoutingDecision:
         return RoutingDecision(
