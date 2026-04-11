@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.core.classifier import TaskClassification, TaskClassifier
 from app.core.config import settings
@@ -88,7 +89,11 @@ class ModelRouter:
             )
 
         if normalized_model_override is not None:
-            task_type = self._task_type_for_model(normalized_model_override)
+            task_type = self._task_type_for_model(
+                normalized_model_override,
+                file_content_type=file_content_type,
+                file_name=file_name,
+            )
             return RoutingDecision(
                 task_type=task_type,
                 model=normalized_model_override,
@@ -169,10 +174,18 @@ class ModelRouter:
         except Exception:
             return None
 
-    def _task_type_for_model(self, model: str) -> TaskType:
+    def _task_type_for_model(
+        self,
+        model: str,
+        *,
+        file_content_type: str | None = None,
+        file_name: str | None = None,
+    ) -> TaskType:
         normalized = model.lower().strip()
         if normalized in {settings.vision_model.lower(), settings.vision_fallback_model.lower()}:
-            return TaskType.IMAGE_ANALYSIS
+            if self._has_image_input(file_content_type=file_content_type, file_name=file_name):
+                return TaskType.IMAGE_ANALYSIS
+            return TaskType.TEXT
         if normalized == settings.asr_model.lower():
             return TaskType.AUDIO
         if normalized in {
@@ -181,6 +194,19 @@ class ModelRouter:
         }:
             return TaskType.IMAGE_GEN
         return TaskType.TEXT
+
+    def _has_image_input(self, *, file_content_type: str | None, file_name: str | None) -> bool:
+        if isinstance(file_content_type, str):
+            normalized_content_type = file_content_type.lower().strip()
+            if normalized_content_type.startswith("image/") or normalized_content_type == "image/url":
+                return True
+
+        if isinstance(file_name, str) and file_name.strip():
+            suffix = Path(file_name).suffix.lower()
+            if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}:
+                return True
+
+        return False
 
     def _default_model_for_task(self, task_type: TaskType) -> str:
         model_by_task = {
