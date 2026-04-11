@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.task_types import TaskType
 from app.strategies.base import ModelStrategy, StrategyRequest, StrategyResponse
 from app.strategies.audio import AudioStrategy
+from app.strategies.deep_research import DeepResearchStrategy
 from app.strategies.file_qa import FileQAStrategy
 from app.strategies.image_gen import ImageGenStrategy
 from app.strategies.search import SearchStrategy
@@ -202,5 +203,6 @@ model_router = ModelRouter(
         AudioStrategy(),
         ImageGenStrategy(),
         FileQAStrategy(),
+        DeepResearchStrategy(),
     ]
 )
