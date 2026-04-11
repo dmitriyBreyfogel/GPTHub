@@ -9,6 +9,7 @@ from typing import AsyncIterator
 from docx import Document
 from pypdf import PdfReader
 
+from app.core.prompt_cache import prompt_cache_manager
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
@@ -162,10 +163,7 @@ class FileQAStrategy:
         return [
             ChatMessage(
                 role="system",
-                content=(
-                    "Ты отвечаешь на вопросы по документу. Используй только переданные фрагменты документа. "
-                    "Если фрагментов недостаточно, скажи об этом явно."
-                ),
+                content=prompt_cache_manager.build_file_qa_system_prompt(),
             ),
             ChatMessage(
                 role="user",

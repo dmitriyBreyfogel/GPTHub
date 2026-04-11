@@ -28,6 +28,8 @@ class StrategyRequest:
     file_content_type: str | None = None
     context_messages: list[dict] | None = None
     generation_options: dict | None = None
+    workspace_id: str | None = None
+    workspace_instructions: str = ""
 
 
 @dataclass

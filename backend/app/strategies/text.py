@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import AsyncIterator
 
 import app.memory.mem0_client as mem0_module
+from app.core.prompt_cache import prompt_cache_manager
 from app.memory.profile import profile_repo
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
@@ -55,19 +56,13 @@ class TextStrategy:
         return messages
 
     async def _build_system_prompt(self, request: StrategyRequest) -> str:
-        parts = [
-            "Ты корпоративный AI-помощник. Отвечай по делу, учитывай контекст диалога и не выдумывай факты.",
-        ]
-
         profile_text = await self._profile_text(request.user_id)
-        if profile_text:
-            parts.append("Профиль пользователя:\n" + profile_text)
-
         memory_text = await self._memory_text(request.text, request.user_id)
-        if memory_text:
-            parts.append("Релевантные воспоминания:\n" + memory_text)
-
-        return "\n\n".join(parts)
+        return prompt_cache_manager.build_text_system_prompt(
+            profile_text=profile_text,
+            memory_text=memory_text,
+            workspace_instructions=request.workspace_instructions,
+        )
 
     async def _profile_text(self, user_id: str) -> str:
         try:

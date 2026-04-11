@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.core.prompt_cache import prompt_cache_manager
 from app.core.task_types import TaskType
 from app.providers.mws_gpt import ChatMessage, mws_client
 
@@ -321,11 +322,7 @@ class TaskClassifier:
             "additionalProperties": False,
         }
 
-        system = (
-            "Ты классификатор пользовательских запросов для мультимодального чата. "
-            "Выбери наиболее подходящий task_type. "
-            "Возвращай только JSON, соответствующий JSON Schema."
-        )
+        system = prompt_cache_manager.build_classifier_system_prompt()
         user = json.dumps(
             {
                 "text": text.strip(),
