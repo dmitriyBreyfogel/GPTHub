@@ -1,6 +1,20 @@
 name: ${COMPOSE_PROJECT_NAME}
 
 services:
+  traefik:
+    image: traefik:v3.2
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./traefik/traefik.yml:/etc/traefik/traefik.yml:ro"
+    networks:
+      - app
+    restart: unless-stopped
+
   migrate:
     build:
       context: ./backend
@@ -31,6 +45,7 @@ services:
       IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL}
       IMAGE_GENERATION_FALLBACK_MODEL: ${IMAGE_GENERATION_FALLBACK_MODEL}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      TTS_MODEL: ${TTS_MODEL}
       QDRANT_URL: ${QDRANT_URL}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
@@ -42,6 +57,14 @@ services:
       LANGFUSE_HOST: http://langfuse:3000
     ports:
       - "${BACKEND_PORT}:8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=PathPrefix(`/v1`) || PathPrefix(`/health`)"
+      - "traefik.http.routers.backend.entrypoints=web"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.average=200"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=100"
+      - "traefik.http.routers.backend.middlewares=api-ratelimit"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -138,7 +161,7 @@ services:
       OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
       WEBUI_NAME: GPTHub
-      WEBUI_URL: http://localhost:${FRONTEND_PORT}
+      WEBUI_URL: http://localhost
       DEFAULT_MODELS: gpt-4o-mini
       ENABLE_SIGNUP: "false"
       ENABLE_COMMUNITY_SHARING: "false"
@@ -152,6 +175,15 @@ services:
       PIPELINES_URLS: http://pipelines:9099
     ports:
       - "${FRONTEND_PORT}:8080"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.services.frontend.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.frontend-ratelimit.ratelimit.average=300"
+      - "traefik.http.middlewares.frontend-ratelimit.ratelimit.burst=150"
+      - "traefik.http.routers.frontend.middlewares=frontend-ratelimit"
+      - "traefik.http.routers.frontend.priority=1"
     volumes:
       - openwebui-data:/app/backend/data
     depends_on:
