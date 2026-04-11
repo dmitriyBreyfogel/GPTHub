@@ -30,6 +30,9 @@ services:
   backend:
     build:
       context: ./backend
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       BACKEND_HOST: ${BACKEND_HOST}
       BACKEND_RELOAD: ${BACKEND_RELOAD}
@@ -81,6 +84,9 @@ services:
     build:
       context: ./backend
     command: celery -A app.tasks.celery_app.celery_app worker -Q high -c 4 -l info
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       REDIS_URL: ${REDIS_URL}
       RABBITMQ_URL: ${RABBITMQ_URL}
@@ -105,6 +111,9 @@ services:
     build:
       context: ./backend
     command: celery -A app.tasks.celery_app.celery_app worker -Q low -c 2 -l info
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     environment:
       REDIS_URL: ${REDIS_URL}
       RABBITMQ_URL: ${RABBITMQ_URL}
@@ -164,6 +173,7 @@ services:
       SHOW_CHANGELOG: "false"
       ENABLE_COMMUNITY_SHARING: "false"
       ENABLE_MESSAGE_RATING: "true"
+      DEFAULT_LOCALE: ru-RU
       AUDIO_STT_ENGINE: openai
       AUDIO_STT_OPENAI_API_BASE_URL: http://backend:8000/v1
       AUDIO_STT_OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
