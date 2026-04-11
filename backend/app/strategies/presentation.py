@@ -11,6 +11,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 
 from app.core.config import settings
+from app.core.prompt_cache import prompt_cache_manager
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.storage.files import file_storage
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
@@ -66,11 +67,7 @@ class PresentationStrategy:
         messages = [
             ChatMessage(
                 role="system",
-                content=(
-                    "Ты создаешь структуру презентации. Верни только JSON с полем slides. "
-                    "Каждый slide должен содержать title, bullets и speaker_notes. "
-                    "bullets должен быть массивом коротких тезисов. Сделай 5-10 слайдов."
-                ),
+                content=prompt_cache_manager.build_presentation_system_prompt(),
             ),
             ChatMessage(role="user", content=request.text.strip()),
         ]

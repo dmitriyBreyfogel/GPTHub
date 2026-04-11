@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from app.core.prompt_cache import prompt_cache_manager
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
@@ -109,11 +110,7 @@ class WebParseStrategy:
         return [
             ChatMessage(
                 role="system",
-                content=(
-                    "Ты анализируешь веб-страницы. "
-                    "Отвечай только по переданному тексту страницы и явно указывай, если данных недостаточно. "
-                    "В конце добавляй источник с URL страницы."
-                ),
+                content=prompt_cache_manager.build_web_parse_system_prompt(),
             ),
             ChatMessage(role="user", content=user_content),
         ]

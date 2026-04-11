@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import AsyncIterator
 
+from app.core.prompt_cache import prompt_cache_manager
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.providers.search.base import SearchProvider, SearchResult
 from app.providers.search.duckduckgo import DuckDuckGoSearch
@@ -58,12 +59,7 @@ class SearchStrategy:
         return [
             ChatMessage(
                 role="system",
-                content=(
-                    "Ты отвечаешь на основе результатов веб-поиска. "
-                    "Синтезируй короткий и точный ответ, указывай источники в формате [1], [2]. "
-                    "В конце добавляй список источников с URL. "
-                    "Если результатов недостаточно, скажи об этом явно."
-                ),
+                content=prompt_cache_manager.build_search_system_prompt(),
             ),
             ChatMessage(
                 role="user",

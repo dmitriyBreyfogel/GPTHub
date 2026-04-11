@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 from langgraph.graph import END, START, StateGraph
 
 from app.core.config import settings
+from app.core.prompt_cache import prompt_cache_manager
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.providers.search.base import SearchProvider, SearchResult
 from app.providers.search.duckduckgo import DuckDuckGoSearch
@@ -109,10 +110,7 @@ class DeepResearchStrategy:
         messages = [
             ChatMessage(
                 role="system",
-                content=(
-                    "Ты планируешь web research. Верни только JSON с полями steps и queries. "
-                    "queries должен содержать до 4 поисковых запросов, покрывающих разные аспекты темы."
-                ),
+                content=prompt_cache_manager.build_research_plan_system_prompt(),
             ),
             ChatMessage(role="user", content=query),
         ]
@@ -244,11 +242,7 @@ class DeepResearchStrategy:
         return [
             ChatMessage(
                 role="system",
-                content=(
-                    "Ты выполняешь deep research по найденным источникам. "
-                    "Синтезируй структурированный ответ, указывай ссылки на источники в формате [1], [2]. "
-                    "Если источников недостаточно, явно отдели подтвержденные факты от предположений."
-                ),
+                content=prompt_cache_manager.build_research_synthesis_system_prompt(),
             ),
             ChatMessage(
                 role="user",
