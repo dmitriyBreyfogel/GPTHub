@@ -339,6 +339,17 @@ def _file_from_messages(body: dict) -> RequestFile | None:
     for message in reversed(messages):
         if not isinstance(message, dict) or message.get("role") != "user":
             continue
+        files = message.get("files")
+        if isinstance(files, list):
+            for item in files:
+                if not isinstance(item, dict):
+                    continue
+                file = _file_from_known_value(item)
+                if file is not None:
+                    return file
+                file = _file_from_known_value(item.get("file"))
+                if file is not None:
+                    return file
         content = message.get("content")
         if not isinstance(content, list):
             continue
@@ -397,6 +408,28 @@ def _file_ref_from_container(container: object) -> tuple[str, str | None, str | 
             _string_value(container.get("content_type")) or _string_value(container.get("mime_type")),
         )
 
+    direct_file_id = _uuid_value(container.get("id"))
+    if direct_file_id:
+        nested_file = container.get("file")
+        nested_meta = nested_file.get("meta") if isinstance(nested_file, dict) else None
+        resolved_name = (
+            _string_value(container.get("filename"))
+            or _string_value(container.get("name"))
+            or (_string_value(nested_file.get("filename")) if isinstance(nested_file, dict) else None)
+            or (_string_value(nested_meta.get("name")) if isinstance(nested_meta, dict) else None)
+        )
+        resolved_content_type = (
+            _string_value(container.get("content_type"))
+            or _string_value(container.get("mime_type"))
+            or (_string_value(nested_file.get("content_type")) if isinstance(nested_file, dict) else None)
+            or (_string_value(nested_meta.get("content_type")) if isinstance(nested_meta, dict) else None)
+        )
+        return (
+            direct_file_id,
+            resolved_name,
+            resolved_content_type,
+        )
+
     files = container.get("files")
     if isinstance(files, list):
         for item in files:
@@ -441,6 +474,12 @@ def _file_ref_from_messages(body: dict) -> tuple[str, str | None, str | None] | 
     for message in reversed(messages):
         if not isinstance(message, dict) or message.get("role") != "user":
             continue
+        files = message.get("files")
+        if isinstance(files, list):
+            for item in files:
+                file_ref = _file_ref_from_known_value(item)
+                if file_ref is not None:
+                    return file_ref
         content = message.get("content")
         if not isinstance(content, list):
             continue
@@ -611,6 +650,94 @@ def _openai_stream_metadata(decision: RoutingDecision) -> bytes:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
+def _openai_stream_chunk(
+    *,
+    chunk_id: str,
+    created: int,
+    model: str,
+    delta: dict | None = None,
+    finish_reason: str | None = None,
+) -> bytes:
+    payload = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": delta or {},
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+async def _synthetic_openai_stream(
+    content: str,
+    *,
+    model: str,
+    chunk_id: str | None = None,
+    created: int | None = None,
+):
+    stream_chunk_id = chunk_id or f"chatcmpl-{uuid.uuid4().hex}"
+    stream_created = created or int(time.time())
+
+    yield _openai_stream_chunk(
+        chunk_id=stream_chunk_id,
+        created=stream_created,
+        model=model,
+        delta={"role": "assistant"},
+    )
+
+    normalized_content = content or ""
+    for start in range(0, len(normalized_content), 120):
+        piece = normalized_content[start : start + 120]
+        yield _openai_stream_chunk(
+            chunk_id=stream_chunk_id,
+            created=stream_created,
+            model=model,
+            delta={"content": piece},
+        )
+
+    yield _openai_stream_chunk(
+        chunk_id=stream_chunk_id,
+        created=stream_created,
+        model=model,
+        finish_reason="stop",
+    )
+    yield b"data: [DONE]\n\n"
+
+
+async def _synthetic_openai_stream_from_strategy_response(response: StrategyResponse):
+    async for chunk in _synthetic_openai_stream(
+        response.content,
+        model=response.model_used,
+    ):
+        yield chunk
+
+
+async def _synthetic_openai_stream_from_provider_payload(payload: dict, model: str):
+    message = {}
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices:
+        first_choice = choices[0]
+        if isinstance(first_choice, dict):
+            raw_message = first_choice.get("message")
+            if isinstance(raw_message, dict):
+                message = raw_message
+
+    content = _content_to_text(message.get("content"))
+    async for chunk in _synthetic_openai_stream(
+        content,
+        model=str(payload.get("model") or model),
+        chunk_id=str(payload.get("id") or f"chatcmpl-{uuid.uuid4().hex}"),
+        created=payload.get("created") if isinstance(payload.get("created"), int) else int(time.time()),
+    ):
+        yield chunk
+
+
 @router.post("/chat/completions", openapi_extra=CHAT_COMPLETIONS_OPENAPI_EXTRA)
 async def chat_completions(request: Request, x_user_id: str = Header("anonymous")):
     body = await request.json()
@@ -633,25 +760,60 @@ async def chat_completions(request: Request, x_user_id: str = Header("anonymous"
     async def stream_response():
         yield _openai_stream_metadata(decision)
         async with httpx.AsyncClient() as client:
-            async with client.stream(
-                "POST",
+            emitted_provider_chunk = False
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{settings.mws_gpt_base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.mws_gpt_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
+                    timeout=60.0,
+                ) as resp:
+                    if resp.status_code != 200:
+                        content = await resp.aread()
+                        raise HTTPException(status_code=resp.status_code, detail=content.decode())
+                    async for chunk in resp.aiter_bytes():
+                        emitted_provider_chunk = True
+                        yield chunk
+                return
+            except Exception:
+                if emitted_provider_chunk:
+                    raise
+
+            fallback_body = dict(body)
+            fallback_body["stream"] = False
+            resp = await client.post(
                 f"{settings.mws_gpt_base_url}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {settings.mws_gpt_api_key}",
                     "Content-Type": "application/json",
                 },
-                json=body,
+                json=fallback_body,
                 timeout=60.0,
-            ) as resp:
-                if resp.status_code != 200:
-                    content = await resp.aread()
-                    raise HTTPException(status_code=resp.status_code, detail=content.decode())
-                async for chunk in resp.aiter_bytes():
-                    yield chunk
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            async for chunk in _synthetic_openai_stream_from_provider_payload(payload, decision.model):
+                yield chunk
 
     async def strategy_stream_response():
         yield _openai_stream_metadata(decision)
-        async for chunk in decision.strategy.stream(strategy_request):
+        emitted_strategy_chunk = False
+        try:
+            async for chunk in decision.strategy.stream(strategy_request):
+                emitted_strategy_chunk = True
+                yield chunk
+            return
+        except Exception:
+            if emitted_strategy_chunk:
+                raise
+
+        strategy_response = await decision.strategy.execute(strategy_request)
+        strategy_response = model_router.enrich_response(decision, strategy_response)
+        async for chunk in _synthetic_openai_stream_from_strategy_response(strategy_response):
             yield chunk
 
     is_streaming = body.get("stream", False)
