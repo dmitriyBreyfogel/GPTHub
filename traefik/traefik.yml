@@ -9,7 +9,7 @@ entryPoints:
 providers:
   docker:
     exposedByDefault: false
-    network: app
+    network: gpthub_net
 
 log:
   level: INFO

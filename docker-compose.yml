@@ -151,11 +151,8 @@ services:
     networks:
       - app
 
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        OPENWEBUI_IMAGE: ${OPENWEBUI_IMAGE}
+  openwebui:
+    image: ${OPENWEBUI_IMAGE}
     environment:
       OPENAI_API_BASE_URL: ${OPENWEBUI_API_BASE_URL}
       OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
@@ -163,7 +160,8 @@ services:
       WEBUI_NAME: GPTHub
       WEBUI_URL: http://localhost
       DEFAULT_MODELS: gpt-4o-mini
-      ENABLE_SIGNUP: "false"
+      ENABLE_SIGNUP: "${ENABLE_SIGNUP:-true}"
+      SHOW_CHANGELOG: "false"
       ENABLE_COMMUNITY_SHARING: "false"
       ENABLE_MESSAGE_RATING: "true"
       AUDIO_STT_ENGINE: openai
@@ -173,17 +171,6 @@ services:
       AUDIO_TTS_OPENAI_API_BASE_URL: http://backend:8000/v1
       AUDIO_TTS_OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
       PIPELINES_URLS: http://pipelines:9099
-    ports:
-      - "${FRONTEND_PORT}:8080"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
-      - "traefik.http.routers.frontend.entrypoints=web"
-      - "traefik.http.services.frontend.loadbalancer.server.port=8080"
-      - "traefik.http.middlewares.frontend-ratelimit.ratelimit.average=300"
-      - "traefik.http.middlewares.frontend-ratelimit.ratelimit.burst=150"
-      - "traefik.http.routers.frontend.middlewares=frontend-ratelimit"
-      - "traefik.http.routers.frontend.priority=1"
     volumes:
       - openwebui-data:/app/backend/data
     depends_on:
@@ -191,6 +178,40 @@ services:
       - pipelines
     networks:
       - app
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "${FRONTEND_PORT}:80"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      - "traefik.http.middlewares.frontend-ratelimit.ratelimit.average=300"
+      - "traefik.http.middlewares.frontend-ratelimit.ratelimit.burst=150"
+      - "traefik.http.routers.frontend.middlewares=frontend-ratelimit"
+      - "traefik.http.routers.frontend.priority=1"
+    depends_on:
+      - openwebui
+    networks:
+      - app
+
+  owui-init:
+    build:
+      context: ./frontend/init
+    environment:
+      OPENWEBUI_INTERNAL_URL: http://openwebui:8080
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD}
+    volumes:
+      - ./frontend/functions:/tools:ro
+    depends_on:
+      - openwebui
+    networks:
+      - app
+    restart: on-failure
 
   langfuse-postgres:
     image: postgres:16-alpine
@@ -313,4 +334,5 @@ volumes:
 
 networks:
   app:
+    name: gpthub_net
     driver: bridge

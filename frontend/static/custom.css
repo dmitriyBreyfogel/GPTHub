@@ -1,0 +1,240 @@
+:root {
+    --gpthub-accent: #6366f1;
+    --gpthub-accent-hover: #4f46e5;
+    --gpthub-accent-subtle: rgba(99, 102, 241, 0.12);
+    --gpthub-badge-bg: rgba(99, 102, 241, 0.15);
+    --gpthub-badge-border: rgba(99, 102, 241, 0.35);
+    --gpthub-badge-text: #a5b4fc;
+    --gpthub-surface: rgba(30, 30, 46, 0.95);
+    --gpthub-border: rgba(255, 255, 255, 0.10);
+    --gpthub-tts-size: 28px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--gpthub-accent) !important;
+}
+
+.gpthub-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--gpthub-badge-bg);
+    border: 1px solid var(--gpthub-badge-border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--gpthub-badge-text);
+    margin-bottom: 10px;
+    max-width: fit-content;
+    line-height: 1.4;
+}
+
+.gpthub-indicator::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--gpthub-accent);
+    flex-shrink: 0;
+}
+
+.gpthub-tts {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--gpthub-tts-size);
+    height: var(--gpthub-tts-size);
+    border-radius: 6px;
+    border: 1px solid var(--gpthub-border);
+    background: transparent;
+    cursor: pointer;
+    color: #94a3b8;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.gpthub-tts:hover {
+    color: var(--gpthub-accent);
+    border-color: var(--gpthub-accent);
+    background: var(--gpthub-accent-subtle);
+}
+
+.gpthub-tts.active {
+    color: var(--gpthub-accent);
+    border-color: var(--gpthub-accent);
+    background: var(--gpthub-accent-subtle);
+    animation: gpthub-pulse 1.5s infinite;
+}
+
+@keyframes gpthub-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+#gpthub-panel {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    background: var(--gpthub-surface);
+    border: 1px solid var(--gpthub-border);
+    border-radius: 12px;
+    padding: 8px 12px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(12px);
+}
+
+#gpthub-ws-select {
+    background: transparent;
+    border: 1px solid var(--gpthub-border);
+    border-radius: 7px;
+    color: #cbd5e1;
+    font-size: 12px;
+    padding: 5px 28px 5px 8px;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    max-width: 160px;
+    transition: border-color 0.15s;
+}
+
+#gpthub-ws-select:hover,
+#gpthub-ws-select:focus {
+    border-color: var(--gpthub-accent);
+}
+
+#gpthub-ws-select option {
+    background: #1e1e2e;
+    color: #cbd5e1;
+}
+
+#gpthub-mem-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: transparent;
+    border: 1px solid var(--gpthub-border);
+    border-radius: 7px;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+
+#gpthub-mem-btn:hover {
+    color: var(--gpthub-accent);
+    border-color: var(--gpthub-accent);
+}
+
+#gpthub-memory-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10001;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    align-items: center;
+    justify-content: center;
+}
+
+#gpthub-memory-modal.open {
+    display: flex;
+}
+
+#gpthub-memory-panel {
+    background: #1e1e2e;
+    border: 1px solid var(--gpthub-border);
+    border-radius: 14px;
+    width: 520px;
+    max-width: calc(100vw - 32px);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#gpthub-memory-panel header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--gpthub-border);
+    font-size: 15px;
+    font-weight: 600;
+    color: #f1f5f9;
+}
+
+#gpthub-memory-panel header button {
+    background: none;
+    border: none;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    padding: 0 4px;
+    transition: color 0.15s;
+}
+
+#gpthub-memory-panel header button:hover {
+    color: #f1f5f9;
+}
+
+#gpthub-memory-list {
+    overflow-y: auto;
+    flex: 1;
+    padding: 12px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.gpthub-memory-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--gpthub-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: #cbd5e1;
+    line-height: 1.5;
+}
+
+.gpthub-memory-item span {
+    flex: 1;
+}
+
+.gpthub-memory-del {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #64748b;
+    font-size: 15px;
+    padding: 0;
+    flex-shrink: 0;
+    transition: color 0.15s;
+    line-height: 1;
+}
+
+.gpthub-memory-del:hover {
+    color: #f87171;
+}
+
+#gpthub-memory-empty {
+    color: #475569;
+    font-size: 13px;
+    text-align: center;
+    padding: 24px 0;
+}

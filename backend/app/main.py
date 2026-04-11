@@ -19,9 +19,22 @@ async def lifespan(app: FastAPI):
     from app.core.observability import init_langfuse, flush_langfuse
     init_langfuse()
 
+    import asyncio
+    import logging
     import app.memory.mem0_client as mem0_module
     from app.memory.mem0_client import Mem0Client
-    mem0_module.memory_client = Mem0Client()
+
+    _log = logging.getLogger("gpthub")
+    for _attempt in range(1, 7):
+        try:
+            mem0_module.memory_client = Mem0Client()
+            break
+        except Exception as _exc:
+            if _attempt == 6:
+                _log.warning("Mem0 init failed after 6 attempts, memory disabled: %s", _exc)
+            else:
+                _log.info("Mem0 init attempt %d failed, retry in 5s: %s", _attempt, _exc)
+                await asyncio.sleep(5)
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
