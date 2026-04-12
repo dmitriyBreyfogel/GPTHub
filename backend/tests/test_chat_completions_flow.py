@@ -238,6 +238,99 @@ class ChatCompletionsFlowTests(unittest.TestCase):
         self.assertEqual("true", response.headers["X-GPTHub-Manual-Override"])
         self.assertEqual(TaskType.DEEP_RESEARCH, strategy.execute_requests[0].task_type)
 
+    def test_metadata_task_type_override_is_passed_to_router(self) -> None:
+        strategy = _FakeStrategy(TaskType.PRESENTATION)
+        fake_router = _FakeRouter(
+            _decision(
+                task_type=TaskType.PRESENTATION,
+                model="presentation-model",
+                strategy=strategy,
+                method="manual_task_type",
+                manual_override=True,
+            )
+        )
+
+        with (
+            patch.object(chat_module, "model_router", fake_router),
+            patch.object(chat_module, "resolve_request_file", new=AsyncMock(return_value=RequestFile())),
+            patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
+        ):
+            response = _test_client().post(
+                "/v1/chat/completions",
+                headers={"x-user-id": "user-123"},
+                json={
+                    "model": "auto",
+                    "metadata": {"task_type": "presentation"},
+                    "messages": [{"role": "user", "content": "сделай презентацию"}],
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        route_call = fake_router.route_calls[0]
+        self.assertEqual("presentation", route_call["task_type_override"])
+        self.assertEqual("auto", route_call["model_override"])
+        self.assertEqual("presentation", response.headers["X-GPTHub-Task-Type"])
+
+    def test_explicit_auto_model_is_passed_to_router_before_selected_model_is_written(self) -> None:
+        strategy = _FakeStrategy(TaskType.IMAGE_GEN)
+        fake_router = _FakeRouter(
+            _decision(task_type=TaskType.IMAGE_GEN, model="image-auto-model", strategy=strategy)
+        )
+
+        with (
+            patch.object(chat_module, "model_router", fake_router),
+            patch.object(chat_module, "resolve_request_file", new=AsyncMock(return_value=RequestFile())),
+            patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
+        ):
+            response = _test_client().post(
+                "/v1/chat/completions",
+                headers={"x-user-id": "user-123"},
+                json={
+                    "model": "auto",
+                    "messages": [{"role": "user", "content": "нарисуй картинку"}],
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("auto", fake_router.route_calls[0]["model_override"])
+        self.assertEqual("image-auto-model", strategy.execute_requests[0].model_override)
+        self.assertEqual("image-auto-model", response.json()["model"])
+
+    def test_multimodal_user_content_is_collapsed_before_routing(self) -> None:
+        strategy = _FakeStrategy(TaskType.IMAGE_ANALYSIS)
+        fake_router = _FakeRouter(
+            _decision(task_type=TaskType.IMAGE_ANALYSIS, model="vision-model", strategy=strategy)
+        )
+
+        with (
+            patch.object(chat_module, "model_router", fake_router),
+            patch.object(
+                chat_module,
+                "resolve_request_file",
+                new=AsyncMock(return_value=RequestFile(file_content_type="image/url")),
+            ),
+            patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
+        ):
+            response = _test_client().post(
+                "/v1/chat/completions",
+                headers={"x-user-id": "user-123"},
+                json={
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "Что на изображении?"},
+                                {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}},
+                            ],
+                        }
+                    ],
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("Что на изображении?", fake_router.route_calls[0]["text"])
+        self.assertEqual("image/url", fake_router.route_calls[0]["file_content_type"])
+
     def test_workspace_model_is_used_as_model_override_when_body_model_is_missing(self) -> None:
         strategy = _FakeStrategy(TaskType.TEXT)
         fake_router = _FakeRouter(

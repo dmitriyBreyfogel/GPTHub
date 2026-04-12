@@ -88,23 +88,54 @@ _TASK_INDEX = {
 
 def _embedding_for_prompt(text: str) -> list[float]:
     normalized = text.lower()
-    if any(marker in normalized for marker in ("deep research", "multiple sources", "structured report")):
+    if any(marker in normalized for marker in ("deep research", "multiple sources", "structured report", "исслед")):
         return _one_hot(_TASK_INDEX[TaskType.DEEP_RESEARCH])
-    if any(marker in normalized for marker in ("presentation", "slides", "slide deck", "pitch")):
+    if any(marker in normalized for marker in ("presentation", "slides", "slide deck", "pitch", "презентац", "слайды")):
         return _one_hot(_TASK_INDEX[TaskType.PRESENTATION])
-    if any(marker in normalized for marker in ("search the web", "find online", "latest news", "look up")):
-        return _one_hot(_TASK_INDEX[TaskType.SEARCH])
-    if any(marker in normalized for marker in ("article", "web page", "read this page", "url")):
-        return _one_hot(_TASK_INDEX[TaskType.WEB_PARSE])
-    if any(marker in normalized for marker in ("document", "file", "pdf")):
-        return _one_hot(_TASK_INDEX[TaskType.FILE_QA])
-    if any(marker in normalized for marker in ("audio", "recording", "transcribe", "call")):
-        return _one_hot(_TASK_INDEX[TaskType.AUDIO])
-    if any(marker in normalized for marker in ("generate an image", "illustration", "make a picture")):
-        return _one_hot(_TASK_INDEX[TaskType.IMAGE_GEN])
-    if any(marker in normalized for marker in ("describe this image", "analyze the picture", "photo")):
+    if any(
+        marker in normalized
+        for marker in ("describe this image", "analyze the picture", "photo", "изображен", "фото")
+    ):
         return _one_hot(_TASK_INDEX[TaskType.IMAGE_ANALYSIS])
+    if any(
+        marker in normalized
+        for marker in ("audio", "recording", "transcribe", "call", "аудио", "запис", "расшифр")
+    ):
+        return _one_hot(_TASK_INDEX[TaskType.AUDIO])
+    if any(marker in normalized for marker in ("document", "file", "pdf", "документ", "файл")):
+        return _one_hot(_TASK_INDEX[TaskType.FILE_QA])
+    if any(
+        marker in normalized
+        for marker in ("generate an image", "illustration", "make a picture", "нарисуй", "картинк")
+    ):
+        return _one_hot(_TASK_INDEX[TaskType.IMAGE_GEN])
+    if any(
+        marker in normalized
+        for marker in ("search the web", "find online", "latest news", "look up", "найди свеж", "поищи")
+    ):
+        return _one_hot(_TASK_INDEX[TaskType.SEARCH])
+    if any(marker in normalized for marker in ("article", "web page", "read this page", "url", "страниц", "ссылк")):
+        return _one_hot(_TASK_INDEX[TaskType.WEB_PARSE])
     return _one_hot(_TASK_INDEX[TaskType.TEXT])
+
+
+def _semantic_test(
+    prompt: str,
+    expected_task_type: TaskType,
+):
+    async def test(self) -> None:
+        classifier = TaskClassifier(semantic_threshold=0.3, semantic_margin=0.01)
+        classifier._centroids = {
+            task_type: _one_hot(index)
+            for task_type, index in _TASK_INDEX.items()
+        }
+        with patch("app.core.classifier.mws_client.embed", new=AsyncMock(side_effect=_embedding_for_prompt)):
+            result = await classifier.classify(prompt)
+
+        self.assertEqual(expected_task_type, result.task_type)
+        self.assertEqual("semantic", result.method)
+
+    return test
 
 
 class TaskClassifierTests(unittest.IsolatedAsyncioTestCase):
@@ -204,6 +235,23 @@ class TaskClassifierTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(TaskType.TEXT, result.task_type)
         self.assertEqual("fallback", result.method)
 
+    async def test_llm_fallback_accepts_valid_non_deep_research_task_type(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(return_value=None)
+        fake_llm_response = ChatResponse(
+            content='{"task_type":"search","confidence":0.82,"reason":"needs web"}',
+            model="router-model",
+            prompt_tokens=1,
+            completion_tokens=1,
+        )
+
+        with patch("app.core.classifier.mws_client.chat", new=AsyncMock(return_value=fake_llm_response)):
+            result = await classifier.classify("Find fresh public information")
+
+        self.assertEqual(TaskType.SEARCH, result.task_type)
+        self.assertEqual("llm", result.method)
+        self.assertEqual(0.82, result.confidence)
+
 
 class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
     async def test_auto_mode_uses_classifier_and_default_model_for_task(self) -> None:
@@ -224,6 +272,23 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(strategy, decision.strategy)
         self.assertEqual(1, len(classifier.calls))
 
+    async def test_all_auto_aliases_use_classifier(self) -> None:
+        for alias in (None, "auto", "gpthub-auto", "gpthub_auto", "automatic"):
+            with self.subTest(alias=alias):
+                classifier = _RecordingClassifier(_classification(TaskType.PRESENTATION))
+                router = ModelRouter(classifier=classifier)
+
+                decision = await router.route(
+                    "Create a presentation about the architecture",
+                    user_id="user-1",
+                    model_override=alias,
+                )
+
+                self.assertEqual(TaskType.PRESENTATION, decision.task_type)
+                self.assertEqual(settings.default_text_model, decision.model)
+                self.assertEqual("semantic", decision.method)
+                self.assertEqual(1, len(classifier.calls))
+
     async def test_explicit_model_bypasses_text_classifier_and_is_preserved(self) -> None:
         classifier = _RecordingClassifier(_classification(TaskType.SEARCH))
         router = ModelRouter(classifier=classifier)
@@ -239,6 +304,42 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("manual_model", decision.method)
         self.assertTrue(decision.manual_override)
         self.assertEqual([], classifier.calls)
+
+    async def test_manual_task_type_with_explicit_model_preserves_model(self) -> None:
+        classifier = _RecordingClassifier(_classification(TaskType.TEXT))
+        strategy = _FakeStrategy(TaskType.PRESENTATION)
+        router = ModelRouter(classifier=classifier, strategies=[strategy])
+
+        decision = await router.route(
+            "Deck outline",
+            user_id="user-1",
+            model_override="deck-model",
+            task_type_override="presentation",
+        )
+
+        self.assertEqual(TaskType.PRESENTATION, decision.task_type)
+        self.assertEqual("deck-model", decision.model)
+        self.assertEqual("manual_task_type", decision.method)
+        self.assertTrue(decision.manual_override)
+        self.assertIs(strategy, decision.strategy)
+        self.assertEqual([], classifier.calls)
+
+    async def test_invalid_task_type_override_falls_back_to_auto_routing(self) -> None:
+        classifier = _RecordingClassifier(_classification(TaskType.IMAGE_GEN))
+        router = ModelRouter(classifier=classifier)
+
+        decision = await router.route(
+            "Generate an image from this prompt",
+            user_id="user-1",
+            model_override="auto",
+            task_type_override="not-a-task",
+        )
+
+        self.assertEqual(TaskType.IMAGE_GEN, decision.task_type)
+        self.assertEqual(settings.image_generation_model, decision.model)
+        self.assertEqual("semantic", decision.method)
+        self.assertFalse(decision.manual_override)
+        self.assertEqual(1, len(classifier.calls))
 
     async def test_explicit_model_with_document_routes_to_file_qa_but_keeps_text_model(self) -> None:
         classifier = _RecordingClassifier(_classification(TaskType.TEXT))
@@ -257,6 +358,21 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("manual_model", decision.method)
         self.assertEqual([], classifier.calls)
 
+    async def test_explicit_asr_model_with_document_switches_to_default_text_model(self) -> None:
+        router = ModelRouter(classifier=_RecordingClassifier(_classification(TaskType.TEXT)))
+
+        decision = await router.route(
+            "Summarize this document",
+            user_id="user-1",
+            model_override=settings.asr_model,
+            file_content_type="application/pdf",
+            file_name="report.pdf",
+        )
+
+        self.assertEqual(TaskType.FILE_QA, decision.task_type)
+        self.assertEqual(settings.default_text_model, decision.model)
+        self.assertEqual("manual_model", decision.method)
+
     async def test_explicit_model_with_audio_switches_to_asr_model(self) -> None:
         router = ModelRouter(classifier=_RecordingClassifier(_classification(TaskType.TEXT)))
 
@@ -266,6 +382,19 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
             model_override="custom-text-model",
             file_content_type="audio/wav",
             file_name="call.wav",
+        )
+
+        self.assertEqual(TaskType.AUDIO, decision.task_type)
+        self.assertEqual(settings.asr_model, decision.model)
+        self.assertEqual("manual_model", decision.method)
+
+    async def test_explicit_asr_model_without_file_routes_to_audio(self) -> None:
+        router = ModelRouter(classifier=_RecordingClassifier(_classification(TaskType.TEXT)))
+
+        decision = await router.route(
+            "Transcribe the recording",
+            user_id="user-1",
+            model_override=settings.asr_model,
         )
 
         self.assertEqual(TaskType.AUDIO, decision.task_type)
@@ -287,6 +416,34 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("custom-text-model", decision.model)
         self.assertEqual("manual_model", decision.method)
 
+    async def test_explicit_vision_model_with_image_routes_to_image_analysis(self) -> None:
+        router = ModelRouter(classifier=_RecordingClassifier(_classification(TaskType.TEXT)))
+
+        decision = await router.route(
+            "What is in the image?",
+            user_id="user-1",
+            model_override=settings.vision_model,
+            file_content_type="image/png",
+            file_name="screen.png",
+        )
+
+        self.assertEqual(TaskType.IMAGE_ANALYSIS, decision.task_type)
+        self.assertEqual(settings.vision_model, decision.model)
+        self.assertEqual("manual_model", decision.method)
+
+    async def test_explicit_image_generation_model_routes_to_image_gen(self) -> None:
+        router = ModelRouter(classifier=_RecordingClassifier(_classification(TaskType.TEXT)))
+
+        decision = await router.route(
+            "Make a picture of a city",
+            user_id="user-1",
+            model_override=settings.image_generation_model,
+        )
+
+        self.assertEqual(TaskType.IMAGE_GEN, decision.task_type)
+        self.assertEqual(settings.image_generation_model, decision.model)
+        self.assertEqual("manual_model", decision.method)
+
     async def test_deep_research_task_type_override_wins_over_auto_model(self) -> None:
         classifier = _RecordingClassifier(_classification(TaskType.TEXT))
         strategy = _FakeStrategy(TaskType.DEEP_RESEARCH)
@@ -305,6 +462,46 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(decision.manual_override)
         self.assertIs(strategy, decision.strategy)
         self.assertEqual([], classifier.calls)
+
+
+class SemanticPromptClassificationTests(unittest.IsolatedAsyncioTestCase):
+    pass
+
+
+_SEMANTIC_PROMPT_CASES = {
+    "text_explain": ("Explain JWT validation to a junior developer", TaskType.TEXT),
+    "text_rewrite": ("Rewrite this paragraph and make it shorter", TaskType.TEXT),
+    "text_summary": ("Summarize the meeting notes in five bullets", TaskType.TEXT),
+    "image_gen_english": ("Generate an image from this prompt: red tram at night", TaskType.IMAGE_GEN),
+    "image_gen_russian": ("Нарисуй картинку: красный трамвай ночью", TaskType.IMAGE_GEN),
+    "image_gen_illustration": ("Create a minimal illustration for a mobile app", TaskType.IMAGE_GEN),
+    "search_english": ("Search the web for recent information about GPTHub", TaskType.SEARCH),
+    "search_russian": ("Найди свежие новости про корпоративные AI сервисы", TaskType.SEARCH),
+    "search_lookup": ("Look up market benchmarks and include sources", TaskType.SEARCH),
+    "web_parse_article": ("Read this page and make concise notes", TaskType.WEB_PARSE),
+    "web_parse_url_word": ("Extract facts from this web page URL", TaskType.WEB_PARSE),
+    "web_parse_russian": ("Разбери текст страницы и выдели факты", TaskType.WEB_PARSE),
+    "file_qa_pdf": ("Answer questions about this PDF document", TaskType.FILE_QA),
+    "file_qa_russian": ("Извлеки ключевые факты из документа", TaskType.FILE_QA),
+    "file_qa_file": ("Read the uploaded file and find the relevant section", TaskType.FILE_QA),
+    "audio_transcribe": ("Transcribe this audio recording and summarize action items", TaskType.AUDIO),
+    "audio_call": ("Summarize this call recording", TaskType.AUDIO),
+    "audio_russian": ("Расшифруй аудио запись встречи", TaskType.AUDIO),
+    "vision_photo": ("Describe this image and identify important details", TaskType.IMAGE_ANALYSIS),
+    "vision_picture": ("Analyze the picture and answer my question", TaskType.IMAGE_ANALYSIS),
+    "vision_russian": ("Опиши фото и найди важные детали", TaskType.IMAGE_ANALYSIS),
+    "presentation_pitch": ("Prepare slides for a project pitch", TaskType.PRESENTATION),
+    "presentation_deck": ("Create a slide deck outline with key points", TaskType.PRESENTATION),
+    "presentation_russian": ("Сделай презентацию по архитектуре проекта", TaskType.PRESENTATION),
+}
+
+
+for _name, (_prompt, _expected_task_type) in _SEMANTIC_PROMPT_CASES.items():
+    setattr(
+        SemanticPromptClassificationTests,
+        f"test_{_name}",
+        _semantic_test(_prompt, _expected_task_type),
+    )
 
 
 if __name__ == "__main__":
