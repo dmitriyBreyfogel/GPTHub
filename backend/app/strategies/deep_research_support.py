@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import json
 import math
-import time
-import uuid
 from dataclasses import dataclass
 from typing import TypedDict
 from urllib.parse import urlparse
 
 from app.providers.search.base import SearchResult
-from app.strategies.base import StrategyResponse
+from app.strategies.response_utils import extract_json_object, stream_chunk
 
 
 ROUTING_REASON = (
@@ -74,32 +71,6 @@ def build_source_context(ranked_documents: list[RankedDocument], context_limit: 
     return "\n\n".join(parts) or NO_SOURCES_MESSAGE
 
 
-def extract_json_object(text: str) -> dict | None:
-    normalized = text.strip()
-    candidates = []
-    start = None
-    depth = 0
-    for index, char in enumerate(normalized):
-        if char == "{":
-            if depth == 0:
-                start = index
-            depth += 1
-        elif char == "}":
-            if depth > 0:
-                depth -= 1
-                if depth == 0 and start is not None:
-                    candidates.append(normalized[start : index + 1])
-                    start = None
-    for candidate in candidates:
-        try:
-            obj = json.loads(candidate)
-            if isinstance(obj, dict):
-                return obj
-        except Exception:
-            continue
-    return None
-
-
 def clean_string_list(value: object, fallback: list[str], limit: int) -> list[str]:
     if not isinstance(value, list):
         return fallback[:limit]
@@ -138,24 +109,3 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
     if denom == 0.0:
         return 0.0
     return dot / denom
-
-
-def stream_chunk(
-    response: StrategyResponse,
-    content: str,
-    finish_reason: str | None,
-) -> bytes:
-    payload = {
-        "id": f"chatcmpl-{uuid.uuid4().hex}",
-        "object": "chat.completion.chunk",
-        "created": int(time.time()),
-        "model": response.model_used,
-        "choices": [
-            {
-                "index": 0,
-                "delta": {"role": "assistant", "content": content} if content else {},
-                "finish_reason": finish_reason,
-            }
-        ],
-    }
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
