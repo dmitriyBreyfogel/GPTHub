@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
-import time
-import uuid
 from typing import AsyncIterator
 
 from app.core.config import settings
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
+from app.strategies.response_utils import stream_chunk
 from app.tasks.image_tasks import generate_image
 
 
@@ -44,8 +42,18 @@ class ImageGenStrategy:
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
         response = await self.execute(request)
-        yield self._stream_chunk(response, response.content, finish_reason=None)
-        yield self._stream_chunk(response, "", finish_reason="stop")
+        yield stream_chunk(
+            response,
+            response.content,
+            finish_reason=None,
+            include_gpthub=True,
+        )
+        yield stream_chunk(
+            response,
+            "",
+            finish_reason="stop",
+            include_gpthub=True,
+        )
         yield b"data: [DONE]\n\n"
 
     def _fallback_model(self, model: str) -> str | None:
@@ -53,25 +61,3 @@ class ImageGenStrategy:
         if not fallback_model or fallback_model.lower() == model.lower():
             return None
         return fallback_model
-
-    def _stream_chunk(self, response: StrategyResponse, content: str, finish_reason: str | None) -> bytes:
-        payload = {
-            "id": f"chatcmpl-{uuid.uuid4().hex}",
-            "object": "chat.completion.chunk",
-            "created": int(time.time()),
-            "model": response.model_used,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"role": "assistant", "content": content} if content else {},
-                    "finish_reason": finish_reason,
-                }
-            ],
-        }
-        if response.task_id:
-            payload["gpthub"] = {
-                "task_id": response.task_id,
-                "status_url": response.status_url,
-                "task_type": response.task_type.value,
-            }
-        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")

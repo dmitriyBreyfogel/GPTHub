@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import json
-import time
-import uuid
 from dataclasses import dataclass
 from io import BytesIO
 from typing import AsyncIterator
@@ -15,6 +12,7 @@ from app.core.prompt_cache import prompt_cache_manager
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.storage.files import file_storage
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
+from app.strategies.response_utils import extract_json_object, stream_chunk
 
 
 @dataclass(frozen=True)
@@ -59,8 +57,8 @@ class PresentationStrategy:
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
         response = await self.execute(request)
-        yield self._stream_chunk(response, response.content, finish_reason=None)
-        yield self._stream_chunk(response, "", finish_reason="stop")
+        yield stream_chunk(response, response.content, finish_reason=None)
+        yield stream_chunk(response, "", finish_reason="stop")
         yield b"data: [DONE]\n\n"
 
     async def _generate_slide_specs(self, request: StrategyRequest) -> list[SlideSpec]:
@@ -77,7 +75,7 @@ class PresentationStrategy:
             temperature=0.4,
             generation_options=request.generation_options,
         )
-        data = self._extract_json_object(response.content) or {}
+        data = extract_json_object(response.content) or {}
         slides = self._parse_slides(data)
         if not slides:
             slides = self._fallback_slides(request.text.strip())
@@ -155,31 +153,6 @@ class PresentationStrategy:
         notes_frame = slide.notes_slide.notes_text_frame
         notes_frame.text = speaker_notes
 
-    def _extract_json_object(self, text: str) -> dict | None:
-        normalized = text.strip()
-        candidates = []
-        start = None
-        depth = 0
-        for index, char in enumerate(normalized):
-            if char == "{":
-                if depth == 0:
-                    start = index
-                depth += 1
-            elif char == "}":
-                if depth > 0:
-                    depth -= 1
-                    if depth == 0 and start is not None:
-                        candidates.append(normalized[start : index + 1])
-                        start = None
-        for candidate in candidates:
-            try:
-                obj = json.loads(candidate)
-                if isinstance(obj, dict):
-                    return obj
-            except Exception:
-                continue
-        return None
-
     def _filename(self, prompt: str) -> str:
         slug = "".join(char if char.isalnum() else "-" for char in prompt.lower())
         slug = "-".join(part for part in slug.split("-") if part)
@@ -191,19 +164,3 @@ class PresentationStrategy:
         if not isinstance(value, str):
             return ""
         return " ".join(value.split()).strip()
-
-    def _stream_chunk(self, response: StrategyResponse, content: str, finish_reason: str | None) -> bytes:
-        payload = {
-            "id": f"chatcmpl-{uuid.uuid4().hex}",
-            "object": "chat.completion.chunk",
-            "created": int(time.time()),
-            "model": response.model_used,
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"role": "assistant", "content": content} if content else {},
-                    "finish_reason": finish_reason,
-                }
-            ],
-        }
-        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")

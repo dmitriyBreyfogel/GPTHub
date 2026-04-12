@@ -4,8 +4,8 @@ import json
 import math
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
+from app.core.file_types import infer_mime_from_filename, task_type_from_mime
 from app.core.prompt_cache import prompt_cache_manager
 from app.core.task_types import TaskType
 from app.providers.mws_gpt import ChatMessage, mws_client
@@ -52,54 +52,23 @@ def _avg_embedding(vectors: list[list[float]]) -> list[float]:
     return [value / count for value in acc]
 
 
-def _infer_mime_from_filename(filename: str | None) -> str | None:
-    if not filename:
-        return None
-    ext = Path(filename).suffix.lower().lstrip(".")
-    if ext in {"png", "jpg", "jpeg", "webp", "gif", "bmp", "tiff"}:
-        return f"image/{'jpeg' if ext in {'jpg', 'jpeg'} else ext}"
-    if ext in {"wav", "mp3", "m4a", "ogg", "flac", "aac"}:
-        return f"audio/{ext}"
-    if ext in {"mp4", "mov", "mkv", "webm"}:
-        return f"video/{ext}"
-    if ext == "pdf":
-        return "application/pdf"
-    if ext in {"txt", "md", "csv", "json"}:
-        return "text/plain"
-    if ext == "docx":
-        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if ext == "pptx":
-        return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    return None
-
-
 def _classify_by_mime(mime: str | None) -> TaskClassification | None:
-    if not mime:
-        return None
-    normalized_mime = mime.lower().strip()
-    if normalized_mime.startswith("image/"):
+    task_type = task_type_from_mime(mime)
+    if task_type == TaskType.IMAGE_ANALYSIS:
         return TaskClassification(
             task_type=TaskType.IMAGE_ANALYSIS,
             routing_reason=f"Файл с MIME `{mime}` выглядит как изображение.",
             confidence=0.99,
             method="mime",
         )
-    if normalized_mime.startswith("audio/") or normalized_mime.startswith("video/"):
+    if task_type == TaskType.AUDIO:
         return TaskClassification(
             task_type=TaskType.AUDIO,
             routing_reason=f"Файл с MIME `{mime}` выглядит как аудио/видео.",
             confidence=0.99,
             method="mime",
         )
-    if normalized_mime in {
-        "application/pdf",
-        "text/plain",
-        "text/markdown",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/vnd.ms-powerpoint",
-    }:
+    if task_type == TaskType.FILE_QA:
         return TaskClassification(
             task_type=TaskType.FILE_QA,
             routing_reason=f"Файл с MIME `{mime}` выглядит как документ для вопросов/ответов.",
@@ -165,7 +134,7 @@ class TaskClassifier:
         file_content_type: str | None = None,
         file_name: str | None = None,
     ) -> TaskClassification:
-        mime = file_content_type or _infer_mime_from_filename(file_name)
+        mime = file_content_type or infer_mime_from_filename(file_name)
         mime_result = _classify_by_mime(mime)
         if mime_result:
             return mime_result

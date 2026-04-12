@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from app.memory.mem0_client import memory_client
+from app.memory.mem0_client import IMemoryClient, MemoryUnavailableError, get_memory_client
 from app.memory.profile import UserProfile, profile_repo
 
 router = APIRouter()
@@ -14,25 +14,32 @@ class AddMemoryRequest(BaseModel):
 class ProfileUpdateRequest(BaseModel):
     name: str = ""
     role: str = ""
-    preferences: dict = {}
-    core_facts: list[str] = []
+    preferences: dict = Field(default_factory=dict)
+    core_facts: list[str] = Field(default_factory=list)
+
+
+def _memory_client() -> IMemoryClient:
+    try:
+        return get_memory_client()
+    except MemoryUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/memory", status_code=201)
 async def add_memory(body: AddMemoryRequest, x_user_id: str = Header(...)):
-    await memory_client.add(messages=body.messages, user_id=x_user_id)
+    await _memory_client().add(messages=body.messages, user_id=x_user_id)
     return {"status": "ok"}
 
 
 @router.get("/memory")
 async def get_memories(x_user_id: str = Header(...)):
-    memories = await memory_client.get_all(user_id=x_user_id)
+    memories = await _memory_client().get_all(user_id=x_user_id)
     return {"memories": memories}
 
 
 @router.delete("/memory/{memory_id}")
 async def delete_memory(memory_id: str, x_user_id: str = Header(...)):
-    await memory_client.delete(memory_id=memory_id, user_id=x_user_id)
+    await _memory_client().delete(memory_id=memory_id, user_id=x_user_id)
     return {"deleted": memory_id}
 
 

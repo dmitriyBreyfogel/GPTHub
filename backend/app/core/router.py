@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from app.core.classifier import TaskClassification, TaskClassifier
 from app.core.config import settings
+from app.core.file_types import has_image_input, task_type_from_file
 from app.core.task_types import TaskType
 from app.strategies.base import ModelStrategy, StrategyRequest, StrategyResponse
 from app.strategies.audio import AudioStrategy
@@ -77,77 +77,23 @@ class ModelRouter:
         normalized_model_override = self._normalize_model_override(model_override)
 
         if normalized_task_type_override is not None:
-            selected_model = normalized_model_override or self._default_model_for_task(normalized_task_type_override)
-            return RoutingDecision(
+            return self._manual_task_type_decision(
                 task_type=normalized_task_type_override,
-                model=selected_model,
-                routing_reason=f"Ручной выбор типа задачи: {normalized_task_type_override.value}.",
-                strategy=self.get_strategy(normalized_task_type_override),
-                confidence=1.0,
-                method="manual_task_type",
-                manual_override=True,
+                model_override=normalized_model_override,
             )
 
         if normalized_model_override is not None:
-            file_task_type = self._task_type_from_file(
-                file_content_type=file_content_type,
-                file_name=file_name,
-            )
-            if file_task_type is not None:
-                if file_task_type == TaskType.IMAGE_ANALYSIS:
-                    task_type = self._task_type_for_model(
-                        normalized_model_override,
-                        file_content_type=file_content_type,
-                        file_name=file_name,
-                    )
-                    return RoutingDecision(
-                        task_type=task_type,
-                        model=normalized_model_override,
-                        routing_reason=f"Manual model selection: {normalized_model_override}. Image input does not auto-switch the model.",
-                        strategy=self.get_strategy(task_type),
-                        confidence=1.0,
-                        method="manual_model",
-                        manual_override=True,
-                    )
-                selected_model = self._model_for_file_task(file_task_type, normalized_model_override)
-                routing_reason = f"Р СѓС‡РЅРѕР№ РІС‹Р±РѕСЂ РјРѕРґРµР»Рё: {normalized_model_override}."
-                if selected_model != normalized_model_override:
-                    routing_reason = (
-                        f"{routing_reason} "
-                        f"РћР±РЅР°СЂСѓР¶РµРЅ С„Р°Р№Р» С‚РёРїР° `{file_task_type.value}`, "
-                        f"РїРµСЂРµРєР»СЋС‡Р°СЋ РЅР° РјРѕРґРµР»СЊ `{selected_model}`."
-                    )
-                return RoutingDecision(
-                    task_type=file_task_type,
-                    model=selected_model,
-                    routing_reason=routing_reason,
-                    strategy=self.get_strategy(file_task_type),
-                    confidence=1.0,
-                    method="manual_model",
-                    manual_override=True,
-                )
-            task_type = self._task_type_for_model(
-                normalized_model_override,
-                file_content_type=file_content_type,
-                file_name=file_name,
-            )
-            return RoutingDecision(
-                task_type=task_type,
+            return self._manual_model_decision(
                 model=normalized_model_override,
-                routing_reason=f"Ручной выбор модели: {normalized_model_override}.",
-                strategy=self.get_strategy(task_type),
-                confidence=1.0,
-                method="manual_model",
-                manual_override=True,
+                file_content_type=file_content_type,
+                file_name=file_name,
             )
 
-        classification = await self._classifier.classify(
+        return await self._auto_decision(
             text,
             file_content_type=file_content_type,
             file_name=file_name,
         )
-        selected_model = self._default_model_for_task(classification.task_type)
-        return self._decision_from_classification(classification, selected_model)
 
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
         decision = await self.route(
@@ -193,6 +139,109 @@ class ModelRouter:
             manual_override=False,
         )
 
+    def _manual_task_type_decision(self, *, task_type: TaskType, model_override: str | None) -> RoutingDecision:
+        selected_model = model_override or self._default_model_for_task(task_type)
+        return RoutingDecision(
+            task_type=task_type,
+            model=selected_model,
+            routing_reason=f"Ручной выбор типа задачи: {task_type.value}.",
+            strategy=self.get_strategy(task_type),
+            confidence=1.0,
+            method="manual_task_type",
+            manual_override=True,
+        )
+
+    def _manual_model_decision(
+        self,
+        *,
+        model: str,
+        file_content_type: str | None,
+        file_name: str | None,
+    ) -> RoutingDecision:
+        file_task_type = task_type_from_file(
+            file_content_type=file_content_type,
+            file_name=file_name,
+        )
+        if file_task_type is not None:
+            return self._manual_model_with_file_decision(
+                model=model,
+                file_task_type=file_task_type,
+                file_content_type=file_content_type,
+                file_name=file_name,
+            )
+
+        task_type = self._task_type_for_model(
+            model,
+            file_content_type=file_content_type,
+            file_name=file_name,
+        )
+        return RoutingDecision(
+            task_type=task_type,
+            model=model,
+            routing_reason=f"Ручной выбор модели: {model}.",
+            strategy=self.get_strategy(task_type),
+            confidence=1.0,
+            method="manual_model",
+            manual_override=True,
+        )
+
+    def _manual_model_with_file_decision(
+        self,
+        *,
+        model: str,
+        file_task_type: TaskType,
+        file_content_type: str | None,
+        file_name: str | None,
+    ) -> RoutingDecision:
+        if file_task_type == TaskType.IMAGE_ANALYSIS:
+            task_type = self._task_type_for_model(
+                model,
+                file_content_type=file_content_type,
+                file_name=file_name,
+            )
+            return RoutingDecision(
+                task_type=task_type,
+                model=model,
+                routing_reason=f"Ручной выбор модели: {model}. Изображение не переключает модель автоматически.",
+                strategy=self.get_strategy(task_type),
+                confidence=1.0,
+                method="manual_model",
+                manual_override=True,
+            )
+
+        selected_model = self._model_for_file_task(file_task_type, model)
+        routing_reason = f"Ручной выбор модели: {model}."
+        if selected_model != model:
+            routing_reason = (
+                f"{routing_reason} "
+                f"Обнаружен файл типа `{file_task_type.value}`, "
+                f"переключаю на модель `{selected_model}`."
+            )
+        return RoutingDecision(
+            task_type=file_task_type,
+            model=selected_model,
+            routing_reason=routing_reason,
+            strategy=self.get_strategy(file_task_type),
+            confidence=1.0,
+            method="manual_model",
+            manual_override=True,
+        )
+
+    async def _auto_decision(
+        self,
+        text: str,
+        *,
+        file_content_type: str | None,
+        file_name: str | None,
+    ) -> RoutingDecision:
+        classification = await self._classifier.classify(
+            text,
+            file_content_type=file_content_type,
+            file_name=file_name,
+        )
+        selected_model = self._default_model_for_task(classification.task_type)
+        return self._decision_from_classification(classification, selected_model)
+
     def _normalize_model_override(self, model: object | None) -> str | None:
         if model is None or not isinstance(model, str):
             return None
@@ -220,7 +269,7 @@ class ModelRouter:
     ) -> TaskType:
         normalized = model.lower().strip()
         if normalized in {settings.vision_model.lower(), settings.vision_fallback_model.lower()}:
-            if self._has_image_input(file_content_type=file_content_type, file_name=file_name):
+            if has_image_input(file_content_type=file_content_type, file_name=file_name):
                 return TaskType.IMAGE_ANALYSIS
             return TaskType.TEXT
         if normalized == settings.asr_model.lower():
@@ -231,20 +280,6 @@ class ModelRouter:
         }:
             return TaskType.IMAGE_GEN
         return TaskType.TEXT
-
-    def _task_type_from_file(
-        self,
-        *,
-        file_content_type: str | None = None,
-        file_name: str | None = None,
-    ) -> TaskType | None:
-        if self._has_image_input(file_content_type=file_content_type, file_name=file_name):
-            return TaskType.IMAGE_ANALYSIS
-        if self._has_audio_input(file_content_type=file_content_type, file_name=file_name):
-            return TaskType.AUDIO
-        if self._has_document_input(file_content_type=file_content_type, file_name=file_name):
-            return TaskType.FILE_QA
-        return None
 
     def _model_for_file_task(self, task_type: TaskType, model: str) -> str:
         normalized = model.lower().strip()
@@ -264,53 +299,6 @@ class ModelRouter:
             }:
                 return settings.default_text_model
         return model
-
-    def _has_image_input(self, *, file_content_type: str | None, file_name: str | None) -> bool:
-        if isinstance(file_content_type, str):
-            normalized_content_type = file_content_type.lower().strip()
-            if normalized_content_type.startswith("image/") or normalized_content_type == "image/url":
-                return True
-
-        if isinstance(file_name, str) and file_name.strip():
-            suffix = Path(file_name).suffix.lower()
-            if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}:
-                return True
-
-        return False
-
-    def _has_audio_input(self, *, file_content_type: str | None, file_name: str | None) -> bool:
-        if isinstance(file_content_type, str):
-            normalized_content_type = file_content_type.lower().strip()
-            if normalized_content_type.startswith("audio/") or normalized_content_type.startswith("video/"):
-                return True
-
-        if isinstance(file_name, str) and file_name.strip():
-            suffix = Path(file_name).suffix.lower()
-            if suffix in {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".mp4", ".mov", ".mkv", ".webm"}:
-                return True
-
-        return False
-
-    def _has_document_input(self, *, file_content_type: str | None, file_name: str | None) -> bool:
-        if isinstance(file_content_type, str):
-            normalized_content_type = file_content_type.lower().strip()
-            if normalized_content_type in {
-                "application/pdf",
-                "text/plain",
-                "text/markdown",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/msword",
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                "application/vnd.ms-powerpoint",
-            }:
-                return True
-
-        if isinstance(file_name, str) and file_name.strip():
-            suffix = Path(file_name).suffix.lower()
-            if suffix in {".pdf", ".txt", ".md", ".csv", ".json", ".docx", ".doc", ".pptx", ".ppt"}:
-                return True
-
-        return False
 
     def _default_model_for_task(self, task_type: TaskType) -> str:
         model_by_task = {
