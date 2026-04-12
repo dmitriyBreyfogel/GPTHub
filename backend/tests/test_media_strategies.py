@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from io import BytesIO
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -13,9 +14,11 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pptx import Presentation
 
 from app.api.v1 import files as files_module
 from app.core.config import settings
+from app.core.prompt_cache import prompt_cache_manager
 from app.storage.files import StoredFile
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 from app.strategies.image_gen import ImageGenStrategy
@@ -168,6 +171,13 @@ class ImageGenerationStrategyTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
+    def test_presentation_prompt_requests_visual_slide_contract(self) -> None:
+        prompt = prompt_cache_manager.build_presentation_system_prompt()
+
+        for marker in ('"takeaway"', '"visual_hint"', '"layout"', "comparison", "timeline", "metrics"):
+            self.assertIn(marker, prompt)
+        self.assertIn("6-10", prompt)
+
     async def test_execute_returns_markdown_download_link(self) -> None:
         strategy = PresentationStrategy()
         fake_storage = _FakeFileStorage()
@@ -197,6 +207,61 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("/v1/files/presentation-file-id", response.file_url)
         self.assertIn("[Скачать презентацию](/v1/files/presentation-file-id)", response.content)
         self.assertEqual("anonymous", fake_storage.upload_calls[0]["user_id"])
+
+    def test_parse_slides_accepts_design_fields(self) -> None:
+        strategy = PresentationStrategy()
+
+        slides = strategy._parse_slides(
+            {
+                "slides": [
+                    {
+                        "title": "Архитектура GPTHub",
+                        "subtitle": "Поток запроса от UI до модели",
+                        "bullets": ["Frontend", "Router", "Strategy", "MWS GPT"],
+                        "takeaway": "Маршрутизация отделяет UX от выбора модели.",
+                        "visual_hint": "Схема из четырех связанных блоков",
+                        "layout": "two_column",
+                        "speaker_notes": "Пояснить, где принимается решение о task type.",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(1, len(slides))
+        self.assertEqual("title", slides[0].layout)
+        self.assertEqual("Поток запроса от UI до модели", slides[0].subtitle)
+        self.assertEqual("Маршрутизация отделяет UX от выбора модели.", slides[0].takeaway)
+        self.assertEqual("Схема из четырех связанных блоков", slides[0].visual_hint)
+
+    def test_build_pptx_uses_designed_widescreen_layout(self) -> None:
+        strategy = PresentationStrategy()
+
+        deck_bytes = strategy._build_pptx(
+            [
+                SlideSpec(
+                    title="Архитектура GPTHub",
+                    subtitle="Поток запроса от UI до модели",
+                    bullets=["Frontend", "Router", "Strategy"],
+                    takeaway="Маршрутизация отделяет UX от выбора модели.",
+                    visual_hint="Схема из трех блоков",
+                    layout="title",
+                ),
+                SlideSpec(
+                    title="Ключевой сценарий",
+                    bullets=["Классификация запроса", "Выбор стратегии", "Возврат результата"],
+                    takeaway="Каждый шаг явно отделен и тестируем.",
+                    visual_hint="Карточки по этапам",
+                    layout="content",
+                ),
+            ]
+        )
+
+        deck = Presentation(BytesIO(deck_bytes))
+
+        self.assertEqual(2, len(deck.slides))
+        self.assertGreater(deck.slide_width, deck.slide_height)
+        self.assertGreater(len(deck.slides[0].shapes), 8)
+        self.assertGreater(len(deck.slides[1].shapes), 12)
 
 
 class ResponseMetadataTests(unittest.TestCase):
