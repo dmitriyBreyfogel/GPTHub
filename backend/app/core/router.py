@@ -77,77 +77,23 @@ class ModelRouter:
         normalized_model_override = self._normalize_model_override(model_override)
 
         if normalized_task_type_override is not None:
-            selected_model = normalized_model_override or self._default_model_for_task(normalized_task_type_override)
-            return RoutingDecision(
+            return self._manual_task_type_decision(
                 task_type=normalized_task_type_override,
-                model=selected_model,
-                routing_reason=f"Ручной выбор типа задачи: {normalized_task_type_override.value}.",
-                strategy=self.get_strategy(normalized_task_type_override),
-                confidence=1.0,
-                method="manual_task_type",
-                manual_override=True,
+                model_override=normalized_model_override,
             )
 
         if normalized_model_override is not None:
-            file_task_type = task_type_from_file(
-                file_content_type=file_content_type,
-                file_name=file_name,
-            )
-            if file_task_type is not None:
-                if file_task_type == TaskType.IMAGE_ANALYSIS:
-                    task_type = self._task_type_for_model(
-                        normalized_model_override,
-                        file_content_type=file_content_type,
-                        file_name=file_name,
-                    )
-                    return RoutingDecision(
-                        task_type=task_type,
-                        model=normalized_model_override,
-                        routing_reason=f"Manual model selection: {normalized_model_override}. Image input does not auto-switch the model.",
-                        strategy=self.get_strategy(task_type),
-                        confidence=1.0,
-                        method="manual_model",
-                        manual_override=True,
-                    )
-                selected_model = self._model_for_file_task(file_task_type, normalized_model_override)
-                routing_reason = f"Ручной выбор модели: {normalized_model_override}."
-                if selected_model != normalized_model_override:
-                    routing_reason = (
-                        f"{routing_reason} "
-                        f"Обнаружен файл типа `{file_task_type.value}`, "
-                        f"переключаю на модель `{selected_model}`."
-                    )
-                return RoutingDecision(
-                    task_type=file_task_type,
-                    model=selected_model,
-                    routing_reason=routing_reason,
-                    strategy=self.get_strategy(file_task_type),
-                    confidence=1.0,
-                    method="manual_model",
-                    manual_override=True,
-                )
-            task_type = self._task_type_for_model(
-                normalized_model_override,
-                file_content_type=file_content_type,
-                file_name=file_name,
-            )
-            return RoutingDecision(
-                task_type=task_type,
+            return self._manual_model_decision(
                 model=normalized_model_override,
-                routing_reason=f"Ручной выбор модели: {normalized_model_override}.",
-                strategy=self.get_strategy(task_type),
-                confidence=1.0,
-                method="manual_model",
-                manual_override=True,
+                file_content_type=file_content_type,
+                file_name=file_name,
             )
 
-        classification = await self._classifier.classify(
+        return await self._auto_decision(
             text,
             file_content_type=file_content_type,
             file_name=file_name,
         )
-        selected_model = self._default_model_for_task(classification.task_type)
-        return self._decision_from_classification(classification, selected_model)
 
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
         decision = await self.route(
@@ -192,6 +138,109 @@ class ModelRouter:
             method=classification.method,
             manual_override=False,
         )
+
+    def _manual_task_type_decision(self, *, task_type: TaskType, model_override: str | None) -> RoutingDecision:
+        selected_model = model_override or self._default_model_for_task(task_type)
+        return RoutingDecision(
+            task_type=task_type,
+            model=selected_model,
+            routing_reason=f"Ручной выбор типа задачи: {task_type.value}.",
+            strategy=self.get_strategy(task_type),
+            confidence=1.0,
+            method="manual_task_type",
+            manual_override=True,
+        )
+
+    def _manual_model_decision(
+        self,
+        *,
+        model: str,
+        file_content_type: str | None,
+        file_name: str | None,
+    ) -> RoutingDecision:
+        file_task_type = task_type_from_file(
+            file_content_type=file_content_type,
+            file_name=file_name,
+        )
+        if file_task_type is not None:
+            return self._manual_model_with_file_decision(
+                model=model,
+                file_task_type=file_task_type,
+                file_content_type=file_content_type,
+                file_name=file_name,
+            )
+
+        task_type = self._task_type_for_model(
+            model,
+            file_content_type=file_content_type,
+            file_name=file_name,
+        )
+        return RoutingDecision(
+            task_type=task_type,
+            model=model,
+            routing_reason=f"Ручной выбор модели: {model}.",
+            strategy=self.get_strategy(task_type),
+            confidence=1.0,
+            method="manual_model",
+            manual_override=True,
+        )
+
+    def _manual_model_with_file_decision(
+        self,
+        *,
+        model: str,
+        file_task_type: TaskType,
+        file_content_type: str | None,
+        file_name: str | None,
+    ) -> RoutingDecision:
+        if file_task_type == TaskType.IMAGE_ANALYSIS:
+            task_type = self._task_type_for_model(
+                model,
+                file_content_type=file_content_type,
+                file_name=file_name,
+            )
+            return RoutingDecision(
+                task_type=task_type,
+                model=model,
+                routing_reason=f"Ручной выбор модели: {model}. Изображение не переключает модель автоматически.",
+                strategy=self.get_strategy(task_type),
+                confidence=1.0,
+                method="manual_model",
+                manual_override=True,
+            )
+
+        selected_model = self._model_for_file_task(file_task_type, model)
+        routing_reason = f"Ручной выбор модели: {model}."
+        if selected_model != model:
+            routing_reason = (
+                f"{routing_reason} "
+                f"Обнаружен файл типа `{file_task_type.value}`, "
+                f"переключаю на модель `{selected_model}`."
+            )
+        return RoutingDecision(
+            task_type=file_task_type,
+            model=selected_model,
+            routing_reason=routing_reason,
+            strategy=self.get_strategy(file_task_type),
+            confidence=1.0,
+            method="manual_model",
+            manual_override=True,
+        )
+
+    async def _auto_decision(
+        self,
+        text: str,
+        *,
+        file_content_type: str | None,
+        file_name: str | None,
+    ) -> RoutingDecision:
+        classification = await self._classifier.classify(
+            text,
+            file_content_type=file_content_type,
+            file_name=file_name,
+        )
+        selected_model = self._default_model_for_task(classification.task_type)
+        return self._decision_from_classification(classification, selected_model)
 
     def _normalize_model_override(self, model: object | None) -> str | None:
         if model is None or not isinstance(model, str):
