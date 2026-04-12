@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import AsyncIterator
 
 from app.core.config import settings
+from app.providers.mws_gpt import mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 from app.strategies.response_utils import stream_chunk
-from app.tasks.image_tasks import generate_image
 
 
 class ImageGenStrategy:
@@ -18,26 +18,25 @@ class ImageGenStrategy:
 
         model = request.model_override or settings.image_generation_model
         fallback_model = self._fallback_model(model)
-        task = generate_image.apply_async(
-            args=[prompt, model, request.user_id],
-            kwargs={"fallback_model": fallback_model},
+        image_url, model_used, fallback_used = await self._generate_image(
+            prompt,
+            model=model,
+            fallback_model=fallback_model,
         )
-        status_url = f"/v1/tasks/{task.id}"
         content = (
-            "Генерация изображения запущена.\n"
-            f"Task ID: {task.id}\n"
-            f"Status URL: {status_url}\n"
-            f"Model: {model}"
+            "Изображение готово.\n\n"
+            f"![Сгенерированное изображение]({image_url})\n\n"
+            f"Модель: {model_used}"
         )
-        if fallback_model:
-            content += f"\nFallback model: {fallback_model}"
+        if fallback_used:
+            content += f"\nРезервная модель: {model_used}"
         return StrategyResponse(
             content=content,
-            model_used=model,
+            model_used=model_used,
             task_type=self.task_type,
-            routing_reason="Image generation strategy: задача генерации изображения отправлена в Celery.",
-            task_id=task.id,
-            status_url=status_url,
+            routing_reason="Image generation strategy: изображение сгенерировано через MWS GPT и возвращено в ответе чата.",
+            image_url=image_url,
+            sources=[image_url],
         )
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
@@ -61,3 +60,19 @@ class ImageGenStrategy:
         if not fallback_model or fallback_model.lower() == model.lower():
             return None
         return fallback_model
+
+    async def _generate_image(
+        self,
+        prompt: str,
+        *,
+        model: str,
+        fallback_model: str | None,
+    ) -> tuple[str, str, bool]:
+        try:
+            image_url = await mws_client.generate_image(prompt, model=model)
+            return image_url, model, False
+        except Exception:
+            if fallback_model is None:
+                raise
+            image_url = await mws_client.generate_image(prompt, model=fallback_model)
+            return image_url, fallback_model, True

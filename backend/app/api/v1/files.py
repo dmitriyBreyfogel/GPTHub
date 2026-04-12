@@ -46,7 +46,7 @@ async def list_files(x_user_id: str = Header(...)):
 
 
 @router.get("/files/{file_id}")
-async def download_file(file_id: str, x_user_id: str = Header(...)):
+async def download_file(file_id: str, x_user_id: str = Header("anonymous")):
     try:
         data, content_type = await file_storage.download(file_id=file_id, user_id=x_user_id)
     except PermissionError as e:

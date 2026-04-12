@@ -76,6 +76,12 @@ services:
         condition: service_started
     networks:
       - app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
   worker-high:
     build:
@@ -182,10 +188,18 @@ services:
     volumes:
       - openwebui-data:/app/backend/data
     depends_on:
-      - backend
-      - pipelines
+      backend:
+        condition: service_healthy
+      pipelines:
+        condition: service_started
     networks:
       - app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
   frontend:
     build:
@@ -202,7 +216,8 @@ services:
       - "traefik.http.routers.frontend.middlewares=frontend-ratelimit"
       - "traefik.http.routers.frontend.priority=1"
     depends_on:
-      - openwebui
+      openwebui:
+        condition: service_healthy
     networks:
       - app
 
@@ -216,7 +231,8 @@ services:
     volumes:
       - ./frontend/functions:/tools:ro
     depends_on:
-      - openwebui
+      openwebui:
+        condition: service_healthy
     networks:
       - app
     restart: on-failure

@@ -43,7 +43,7 @@ class PresentationStrategy:
         content = (
             "Презентация готова.\n"
             f"Файл: {filename}\n"
-            f"Ссылка: {file_url}\n"
+            f"[Скачать презентацию]({file_url})\n"
             f"Слайдов: {len(slides)}"
         )
         return StrategyResponse(
@@ -57,8 +57,8 @@ class PresentationStrategy:
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
         response = await self.execute(request)
-        yield stream_chunk(response, response.content, finish_reason=None)
-        yield stream_chunk(response, "", finish_reason="stop")
+        yield stream_chunk(response, response.content, finish_reason=None, include_gpthub=True)
+        yield stream_chunk(response, "", finish_reason="stop", include_gpthub=True)
         yield b"data: [DONE]\n\n"
 
     async def _generate_slide_specs(self, request: StrategyRequest) -> list[SlideSpec]:

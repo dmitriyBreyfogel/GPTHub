@@ -57,10 +57,19 @@ def stream_chunk(
             }
         ],
     }
-    if include_gpthub and response.task_id:
-        payload["gpthub"] = {
-            "task_id": response.task_id,
-            "status_url": response.status_url,
+    if include_gpthub:
+        gpthub = {
             "task_type": response.task_type.value,
+            "model": response.model_used,
         }
+        if response.task_id:
+            gpthub["task_id"] = response.task_id
+            gpthub["status_url"] = response.status_url
+        if response.image_url:
+            gpthub["image_url"] = response.image_url
+        if response.file_url:
+            gpthub["file_url"] = response.file_url
+        if response.sources:
+            gpthub["sources"] = response.sources
+        payload["gpthub"] = gpthub
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
