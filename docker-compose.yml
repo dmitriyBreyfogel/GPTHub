@@ -157,6 +157,7 @@ services:
       args:
         OPENWEBUI_GIT_REPO: ${OPENWEBUI_GIT_REPO}
         OPENWEBUI_GIT_REF: ${OPENWEBUI_GIT_REF}
+        OPENWEBUI_BASE_IMAGE: ${OPENWEBUI_IMAGE}
         VITE_GPTHUB_VISION_MODELS: ${VISION_MODEL},${VISION_FALLBACK_MODEL}
     image: gpthub-openwebui:local
     environment:

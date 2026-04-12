@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from app.core.file_types import infer_mime_from_filename, task_type_from_mime
@@ -12,6 +13,11 @@ from app.providers.mws_gpt import ChatMessage, mws_client
 
 
 URL_PATTERN = re.compile(r"https?://[^\s<>)\"']+")
+DEFAULT_AUTO_TASK_TYPES = tuple(
+    task_type
+    for task_type in TaskType
+    if task_type != TaskType.DEEP_RESEARCH
+)
 
 
 @dataclass(frozen=True)
@@ -122,9 +128,11 @@ class TaskClassifier:
         self,
         semantic_threshold: float = 0.36,
         semantic_margin: float = 0.04,
+        auto_task_types: Iterable[TaskType] | None = None,
     ) -> None:
         self._semantic_threshold = float(semantic_threshold)
         self._semantic_margin = float(semantic_margin)
+        self._auto_task_types = tuple(auto_task_types or DEFAULT_AUTO_TASK_TYPES)
         self._centroids: dict[TaskType, list[float]] | None = None
 
     async def classify(
@@ -242,6 +250,8 @@ class TaskClassifier:
 
         centroids: dict[TaskType, list[float]] = {}
         for task_type, examples in prototypes.items():
+            if task_type not in self._auto_task_types:
+                continue
             vectors = [await mws_client.embed(ex) for ex in examples]
             centroids[task_type] = _avg_embedding(vectors)
 
@@ -256,7 +266,7 @@ class TaskClassifier:
         scored = [
             (task_type, _cosine_similarity(query_embedding, centroid))
             for task_type, centroid in centroids.items()
-            if centroid
+            if centroid and task_type in self._auto_task_types
         ]
         if not scored:
             return None
@@ -279,7 +289,7 @@ class TaskClassifier:
         if not text or not text.strip():
             return None
 
-        allowed = [task_type.value for task_type in TaskType]
+        allowed = [task_type.value for task_type in self._auto_task_types]
         schema = {
             "type": "object",
             "properties": {

@@ -1,3 +1,5 @@
+ARG OPENWEBUI_BASE_IMAGE=ghcr.io/open-webui/open-webui:main
+
 FROM node:22-alpine3.20 AS build
 
 ARG OPENWEBUI_GIT_REPO
@@ -22,13 +24,15 @@ ENV VITE_GPTHUB_VISION_MODELS=${VITE_GPTHUB_VISION_MODELS}
 
 RUN npm run build
 
-FROM ghcr.io/open-webui/open-webui:main
+FROM ${OPENWEBUI_BASE_IMAGE}
 
 ARG OPENWEBUI_GIT_REPO
 ARG OPENWEBUI_GIT_REF=main
+ARG OPENWEBUI_BASE_IMAGE
 
 LABEL org.opencontainers.image.source="${OPENWEBUI_GIT_REPO}"
 LABEL org.opencontainers.image.revision="${OPENWEBUI_GIT_REF}"
+LABEL org.opencontainers.image.base.name="${OPENWEBUI_BASE_IMAGE}"
 
 COPY --from=build /src/openwebui/build /app/build
 COPY --from=build /src/openwebui/backend /app/backend
