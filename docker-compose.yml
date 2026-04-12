@@ -152,7 +152,14 @@ services:
       - app
 
   openwebui:
-    image: ${OPENWEBUI_IMAGE}
+    build:
+      context: ./frontend/openwebui-builder
+      args:
+        OPENWEBUI_GIT_REPO: ${OPENWEBUI_GIT_REPO}
+        OPENWEBUI_GIT_REF: ${OPENWEBUI_GIT_REF}
+        OPENWEBUI_BASE_IMAGE: ${OPENWEBUI_IMAGE}
+        VITE_GPTHUB_VISION_MODELS: ${VISION_MODEL},${VISION_FALLBACK_MODEL}
+    image: gpthub-openwebui:local
     environment:
       OPENAI_API_BASE_URL: ${OPENWEBUI_API_BASE_URL}
       OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
