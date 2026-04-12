@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from app.core.classifier import TaskClassification, TaskClassifier
 from app.core.config import settings
+from app.core.file_types import has_image_input, task_type_from_file
 from app.core.task_types import TaskType
 from app.strategies.base import ModelStrategy, StrategyRequest, StrategyResponse
 from app.strategies.audio import AudioStrategy
@@ -89,7 +89,7 @@ class ModelRouter:
             )
 
         if normalized_model_override is not None:
-            file_task_type = self._task_type_from_file(
+            file_task_type = task_type_from_file(
                 file_content_type=file_content_type,
                 file_name=file_name,
             )
@@ -110,12 +110,12 @@ class ModelRouter:
                         manual_override=True,
                     )
                 selected_model = self._model_for_file_task(file_task_type, normalized_model_override)
-                routing_reason = f"Р СѓС‡РЅРѕР№ РІС‹Р±РѕСЂ РјРѕРґРµР»Рё: {normalized_model_override}."
+                routing_reason = f"Ручной выбор модели: {normalized_model_override}."
                 if selected_model != normalized_model_override:
                     routing_reason = (
                         f"{routing_reason} "
-                        f"РћР±РЅР°СЂСѓР¶РµРЅ С„Р°Р№Р» С‚РёРїР° `{file_task_type.value}`, "
-                        f"РїРµСЂРµРєР»СЋС‡Р°СЋ РЅР° РјРѕРґРµР»СЊ `{selected_model}`."
+                        f"Обнаружен файл типа `{file_task_type.value}`, "
+                        f"переключаю на модель `{selected_model}`."
                     )
                 return RoutingDecision(
                     task_type=file_task_type,
@@ -220,7 +220,7 @@ class ModelRouter:
     ) -> TaskType:
         normalized = model.lower().strip()
         if normalized in {settings.vision_model.lower(), settings.vision_fallback_model.lower()}:
-            if self._has_image_input(file_content_type=file_content_type, file_name=file_name):
+            if has_image_input(file_content_type=file_content_type, file_name=file_name):
                 return TaskType.IMAGE_ANALYSIS
             return TaskType.TEXT
         if normalized == settings.asr_model.lower():
@@ -231,20 +231,6 @@ class ModelRouter:
         }:
             return TaskType.IMAGE_GEN
         return TaskType.TEXT
-
-    def _task_type_from_file(
-        self,
-        *,
-        file_content_type: str | None = None,
-        file_name: str | None = None,
-    ) -> TaskType | None:
-        if self._has_image_input(file_content_type=file_content_type, file_name=file_name):
-            return TaskType.IMAGE_ANALYSIS
-        if self._has_audio_input(file_content_type=file_content_type, file_name=file_name):
-            return TaskType.AUDIO
-        if self._has_document_input(file_content_type=file_content_type, file_name=file_name):
-            return TaskType.FILE_QA
-        return None
 
     def _model_for_file_task(self, task_type: TaskType, model: str) -> str:
         normalized = model.lower().strip()
@@ -264,53 +250,6 @@ class ModelRouter:
             }:
                 return settings.default_text_model
         return model
-
-    def _has_image_input(self, *, file_content_type: str | None, file_name: str | None) -> bool:
-        if isinstance(file_content_type, str):
-            normalized_content_type = file_content_type.lower().strip()
-            if normalized_content_type.startswith("image/") or normalized_content_type == "image/url":
-                return True
-
-        if isinstance(file_name, str) and file_name.strip():
-            suffix = Path(file_name).suffix.lower()
-            if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}:
-                return True
-
-        return False
-
-    def _has_audio_input(self, *, file_content_type: str | None, file_name: str | None) -> bool:
-        if isinstance(file_content_type, str):
-            normalized_content_type = file_content_type.lower().strip()
-            if normalized_content_type.startswith("audio/") or normalized_content_type.startswith("video/"):
-                return True
-
-        if isinstance(file_name, str) and file_name.strip():
-            suffix = Path(file_name).suffix.lower()
-            if suffix in {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".mp4", ".mov", ".mkv", ".webm"}:
-                return True
-
-        return False
-
-    def _has_document_input(self, *, file_content_type: str | None, file_name: str | None) -> bool:
-        if isinstance(file_content_type, str):
-            normalized_content_type = file_content_type.lower().strip()
-            if normalized_content_type in {
-                "application/pdf",
-                "text/plain",
-                "text/markdown",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/msword",
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                "application/vnd.ms-powerpoint",
-            }:
-                return True
-
-        if isinstance(file_name, str) and file_name.strip():
-            suffix = Path(file_name).suffix.lower()
-            if suffix in {".pdf", ".txt", ".md", ".csv", ".json", ".docx", ".doc", ".pptx", ".ppt"}:
-                return True
-
-        return False
 
     def _default_model_for_task(self, task_type: TaskType) -> str:
         model_by_task = {
