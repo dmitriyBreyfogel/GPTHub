@@ -94,6 +94,21 @@ class ModelRouter:
                 file_name=file_name,
             )
             if file_task_type is not None:
+                if file_task_type == TaskType.IMAGE_ANALYSIS:
+                    task_type = self._task_type_for_model(
+                        normalized_model_override,
+                        file_content_type=file_content_type,
+                        file_name=file_name,
+                    )
+                    return RoutingDecision(
+                        task_type=task_type,
+                        model=normalized_model_override,
+                        routing_reason=f"Manual model selection: {normalized_model_override}. Image input does not auto-switch the model.",
+                        strategy=self.get_strategy(task_type),
+                        confidence=1.0,
+                        method="manual_model",
+                        manual_override=True,
+                    )
                 selected_model = self._model_for_file_task(file_task_type, normalized_model_override)
                 routing_reason = f"Р СѓС‡РЅРѕР№ РІС‹Р±РѕСЂ РјРѕРґРµР»Рё: {normalized_model_override}."
                 if selected_model != normalized_model_override:
