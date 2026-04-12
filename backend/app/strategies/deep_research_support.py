@@ -35,6 +35,7 @@ class RankedDocument:
 
 
 class ResearchState(TypedDict, total=False):
+    display_query: str
     query: str
     user_id: str
     model: str | None

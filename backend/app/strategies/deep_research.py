@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import AsyncIterator
 
 import httpx
@@ -28,26 +29,35 @@ from app.strategies.deep_research_support import (
     stream_chunk,
     trim_text,
 )
+from app.strategies.query_context import resolve_search_query
 
 
 class DeepResearchStrategy:
     task_type = TaskType.DEEP_RESEARCH
-    max_queries = 4
-    search_limit = 5
-    fetch_limit = 10
-    context_limit = 20000
+    max_queries = 6
+    results_per_query = 8
+    fetch_limit = 12
+    rank_limit = 8
+    context_limit = 32000
 
     def __init__(self, search_provider: SearchProvider | None = None) -> None:
         self._search_provider = search_provider or DuckDuckGoSearch()
         self._graph = self._build_graph()
 
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
-        if not request.text.strip():
+        original_query = request.text.strip()
+        if not original_query:
             raise ValueError("Deep research query is required")
 
+        resolved_query = await resolve_search_query(
+            original_query,
+            request.context_messages,
+            request.model_override,
+        )
         state = await self._graph.ainvoke(
             {
-                "query": request.text.strip(),
+                "display_query": original_query,
+                "query": resolved_query or original_query,
                 "user_id": request.user_id,
                 "model": request.model_override,
                 "generation_options": request.generation_options,
@@ -103,18 +113,22 @@ class DeepResearchStrategy:
             fallback=[fallback_plan_step(query)],
             limit=6,
         )
-        search_queries = clean_string_list(
+        raw_search_queries = clean_string_list(
             plan.get("queries"),
             fallback=[query],
             limit=self.max_queries,
         )
+        search_queries = self._augment_queries(query, raw_search_queries)
         return {
             "plan_steps": plan_steps,
             "search_queries": search_queries,
         }
 
     async def _search(self, state: ResearchState) -> dict:
-        queries = state.get("search_queries") or [state["query"]]
+        queries = self._augment_queries(
+            state["query"],
+            state.get("search_queries") or [state["query"]],
+        )
         result_lists = await asyncio.gather(
             *(self._safe_search(query) for query in queries[: self.max_queries]),
             return_exceptions=False,
@@ -163,7 +177,7 @@ class DeepResearchStrategy:
             )
 
         ranked.sort(key=lambda document: document.score, reverse=True)
-        best_documents = ranked[: self.search_limit]
+        best_documents = ranked[: self.rank_limit]
         return {
             "ranked_documents": best_documents,
             "sources": [document.url for document in best_documents],
@@ -172,6 +186,7 @@ class DeepResearchStrategy:
     async def _synthesize(self, state: ResearchState) -> dict:
         ranked_documents = state.get("ranked_documents") or []
         messages = self._build_synthesis_messages(
+            state.get("display_query") or state["query"],
             state["query"],
             state.get("plan_steps") or [],
             ranked_documents,
@@ -186,7 +201,7 @@ class DeepResearchStrategy:
 
     async def _safe_search(self, query: str) -> list[SearchResult]:
         try:
-            return await self._search_provider.search(query, limit=self.search_limit)
+            return await self._search_provider.search(query, limit=self.results_per_query)
         except Exception:
             return []
 
@@ -212,7 +227,10 @@ class DeepResearchStrategy:
         async with httpx.AsyncClient(
             timeout=20.0,
             follow_redirects=True,
-            headers={"User-Agent": "GPTHub/1.0"},
+            headers={
+                "User-Agent": "GPTHub/1.0",
+                "Accept-Language": "ru,en;q=0.9",
+            },
         ) as client:
             response = await client.get(url)
             response.raise_for_status()
@@ -225,13 +243,54 @@ class DeepResearchStrategy:
         text = soup.get_text("\n", strip=True)
         return trim_text("\n\n".join(part for part in [title, text] if part), 12000)
 
+    def _augment_queries(self, query: str, planned_queries: list[str]) -> list[str]:
+        base_query = query.strip()
+        candidates = [base_query, *planned_queries]
+
+        if re.search(r"[А-Яа-яЁё]", base_query):
+            candidates.extend(
+                [
+                    f"{base_query} официальный сайт",
+                    f"{base_query} детали условия даты",
+                    f"{base_query} регистрация правила участие",
+                    f"{base_query} отзывы разбор анализ",
+                    f"{base_query} итоги результаты влияние",
+                ]
+            )
+        else:
+            candidates.extend(
+                [
+                    f"{base_query} official site",
+                    f"{base_query} details requirements dates",
+                    f"{base_query} registration rules participation",
+                    f"{base_query} reviews analysis",
+                    f"{base_query} results impact comparison",
+                ]
+            )
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            normalized = " ".join((candidate or "").split())
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(normalized)
+            if len(deduped) >= self.max_queries:
+                break
+        return deduped
+
     def _build_synthesis_messages(
         self,
-        query: str,
+        display_query: str,
+        resolved_query: str,
         plan_steps: list[str],
         ranked_documents: list[RankedDocument],
     ) -> list[ChatMessage]:
-        plan_context = "\n".join(f"- {step}" for step in plan_steps)
+        plan_context = "\n".join(f"- {step}" for step in plan_steps) or "- Analyze the topic from the collected sources."
         source_context = build_source_context(ranked_documents, self.context_limit)
         return [
             ChatMessage(
@@ -241,9 +300,17 @@ class DeepResearchStrategy:
             ChatMessage(
                 role="user",
                 content=(
-                    f"Запрос:\n{query}\n\n"
-                    f"План исследования:\n{plan_context}\n\n"
-                    f"Источники:\n{source_context}"
+                    "Original user request:\n"
+                    f"{display_query}\n\n"
+                    "Resolved research focus:\n"
+                    f"{resolved_query}\n\n"
+                    "Research plan:\n"
+                    f"{plan_context}\n\n"
+                    "Collected sources:\n"
+                    f"{source_context}\n\n"
+                    "Write a detailed answer grounded only in the collected sources. "
+                    "Prefer official sources when available. "
+                    "Call out missing data, weak evidence, and contradictions explicitly."
                 ),
             ),
         ]
