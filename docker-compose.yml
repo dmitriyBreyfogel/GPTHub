@@ -195,7 +195,7 @@ services:
     networks:
       - app
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3).read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=3).read()"]
       interval: 5s
       timeout: 5s
       retries: 30

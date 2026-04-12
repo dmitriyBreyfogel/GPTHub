@@ -13,7 +13,7 @@ def wait_for_openwebui(timeout: int = 180) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            r = httpx.get(f"{OPENWEBUI_URL}/health", timeout=5)
+            r = httpx.get(f"{OPENWEBUI_URL}/ready", timeout=5)
             if r.status_code == 200:
                 print("OpenWebUI ready")
                 return
