@@ -1,10 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import select
 
-from app.storage.db import AsyncSessionLocal
 from app.storage.files import file_storage
-from app.storage.models import File, User
 
 router = APIRouter()
 
@@ -33,23 +30,11 @@ async def upload_file(file: UploadFile, x_user_id: str = Header(...)):
 
 @router.get("/files")
 async def list_files(x_user_id: str = Header(...)):
-    async with AsyncSessionLocal() as session:
-        user_result = await session.execute(
-            select(User).where(User.external_id == x_user_id)
-        )
-        user = user_result.scalar_one_or_none()
-        if user is None:
-            return {"files": []}
-
-        result = await session.execute(
-            select(File).where(File.user_id == user.id).order_by(File.created_at.desc())
-        )
-        rows = result.scalars().all()
-
+    rows = await file_storage.list_files(user_id=x_user_id)
     return {
         "files": [
             {
-                "file_id": str(row.id),
+                "file_id": row.file_id,
                 "filename": row.filename,
                 "content_type": row.content_type,
                 "size_bytes": row.size_bytes,

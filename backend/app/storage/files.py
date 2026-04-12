@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from miniopy_async import Minio
@@ -24,6 +25,15 @@ class StoredFile:
     size_bytes: int
 
 
+@dataclass
+class StoredFileInfo:
+    file_id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime
+
+
 class IFileStorage(Protocol):
     async def upload(
         self,
@@ -32,6 +42,8 @@ class IFileStorage(Protocol):
         content_type: str,
         user_id: str,
     ) -> StoredFile: ...
+
+    async def list_files(self, user_id: str) -> list[StoredFileInfo]: ...
 
     async def download(self, file_id: str, user_id: str) -> tuple[bytes, str]: ...
 
@@ -95,6 +107,30 @@ class MinIOFileStorage:
             content_type=content_type,
             size_bytes=size,
         )
+
+    async def list_files(self, user_id: str) -> list[StoredFileInfo]:
+        async with AsyncSessionLocal() as session:
+            db_user_id = await self._get_user_id(session, user_id)
+            if db_user_id is None:
+                return []
+
+            result = await session.execute(
+                select(File)
+                .where(File.user_id == db_user_id)
+                .order_by(File.created_at.desc())
+            )
+            rows = result.scalars().all()
+
+        return [
+            StoredFileInfo(
+                file_id=str(row.id),
+                filename=row.filename,
+                content_type=row.content_type,
+                size_bytes=row.size_bytes,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
 
     async def download(self, file_id: str, user_id: str) -> tuple[bytes, str]:
         async with AsyncSessionLocal() as session:
