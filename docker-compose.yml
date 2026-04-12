@@ -152,13 +152,7 @@ services:
       - app
 
   openwebui:
-    build:
-      context: ./frontend/openwebui
-      args:
-        USE_SLIM: "true"
-        BUILD_HASH: gpthub-local
-        VITE_GPTHUB_VISION_MODELS: ${VISION_MODEL},${VISION_FALLBACK_MODEL}
-    image: gpthub-openwebui:local
+    image: ${OPENWEBUI_IMAGE}
     environment:
       OPENAI_API_BASE_URL: ${OPENWEBUI_API_BASE_URL}
       OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
