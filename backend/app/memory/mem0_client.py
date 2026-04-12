@@ -21,6 +21,10 @@ class IMemoryClient(Protocol):
     async def delete(self, memory_id: str, user_id: str) -> None: ...
 
 
+class MemoryUnavailableError(RuntimeError):
+    pass
+
+
 class Mem0Client:
     def __init__(self) -> None:
         import os
@@ -68,4 +72,10 @@ class Mem0Client:
 
 assert isinstance(Mem0Client.__new__(Mem0Client), IMemoryClient)
 
-memory_client: IMemoryClient = None  # инициализируется в lifespan
+memory_client: IMemoryClient | None = None  # инициализируется в lifespan
+
+
+def get_memory_client() -> IMemoryClient:
+    if memory_client is None:
+        raise MemoryUnavailableError("Memory service is not initialized")
+    return memory_client
