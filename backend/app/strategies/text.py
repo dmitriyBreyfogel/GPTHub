@@ -3,9 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import AsyncIterator
 
-import app.memory.mem0_client as mem0_module
 from app.core.prompt_cache import prompt_cache_manager
-from app.memory.profile import profile_repo
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
@@ -20,7 +18,6 @@ class TextStrategy:
             model=request.model_override,
             generation_options=request.generation_options,
         )
-        await self._save_memory(request, response.content)
         return StrategyResponse(
             content=response.content,
             model_used=response.model,
@@ -57,8 +54,9 @@ class TextStrategy:
         return messages
 
     async def _build_system_prompt(self, request: StrategyRequest) -> str:
-        profile_text = await self._profile_text(request.user_id)
-        memory_text = await self._memory_text(request.text, request.user_id)
+        memory_context = request.memory_context
+        profile_text = memory_context.profile_prompt_text() if memory_context else ""
+        memory_text = memory_context.long_term_prompt_text() if memory_context else ""
         base_prompt = prompt_cache_manager.build_text_system_prompt(
             profile_text=profile_text,
             memory_text=memory_text,
@@ -73,48 +71,9 @@ class TextStrategy:
             f"- Current year: {current_dt.year}\n"
             "Используй эти значения для вопросов про сейчас, сегодня, текущую дату, время и год."
         )
-        return f"{base_prompt}\n\n{runtime_context}"
-
-    async def _profile_text(self, user_id: str) -> str:
-        try:
-            profile = await profile_repo.get(user_id=user_id)
-        except Exception:
-            return ""
-        return profile.to_prompt_text().strip()
-
-    async def _memory_text(self, query: str, user_id: str) -> str:
-        memory_client = mem0_module.memory_client
-        if memory_client is None or not query.strip():
-            return ""
-
-        try:
-            facts = await memory_client.search(query=query, user_id=user_id, limit=5)
-        except Exception:
-            return ""
-
-        lines = []
-        for fact in facts:
-            text = fact.text.strip()
-            if text:
-                lines.append("- " + self._trim(text, 500))
-        return "\n".join(lines)
-
-    async def _save_memory(self, request: StrategyRequest, assistant_text: str) -> None:
-        memory_client = mem0_module.memory_client
-        if memory_client is None or not request.text.strip() or not assistant_text.strip():
-            return
-
-        messages = [
-            {"role": "user", "content": request.text},
-            {"role": "assistant", "content": assistant_text},
-        ]
-        try:
-            await memory_client.add(messages, user_id=request.user_id)
-        except Exception:
-            return
-
-    def _trim(self, text: str, limit: int) -> str:
-        normalized = " ".join(text.split())
-        if len(normalized) <= limit:
-            return normalized
-        return normalized[: limit - 1].rstrip() + "…"
+        evidence_guard = (
+            "If the user asks for current or external factual information that is not present in the provided context, "
+            "do not guess, do not rely on stale training knowledge, and do not fabricate certainty. "
+            "State that web search or external sources are required."
+        )
+        return f"{base_prompt}\n\n{runtime_context}\n\n{evidence_guard}"

@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 
 from app.api.v1.chat_support.parsing import content_to_text
+from app.core.query_signals import build_topic_state
+from app.memory.context import MemoryContext
 from app.providers.mws_gpt import ChatMessage, mws_client
 
 
@@ -198,25 +200,28 @@ async def resolve_search_query(
     query: str,
     context_messages: list[dict] | None,
     model_override: str | None = None,
+    memory_context: MemoryContext | None = None,
 ) -> str:
     query = query.strip()
     if not query:
         return ""
 
     turns = _recent_turns(context_messages, query)
-    if not turns:
+    topic_state = build_topic_state(context_messages, current_text=query)
+    if not turns and not topic_state.canonical_topic:
         return query
 
-    previous_user = _last_previous_user(turns)
-    fallback_query = _merge_query_with_topic(query, previous_user)
+    previous_user = topic_state.previous_user_text or _last_previous_user(turns)
+    topic_seed = topic_state.canonical_topic or topic_state.topic_hint or previous_user
+    fallback_query = _merge_query_with_topic(query, topic_seed)
     if not _needs_resolution(query):
         return query
 
-    user_history = "\n".join(
-        f"User: {_trim(text, 500)}"
+    history = "\n".join(
+        f"{role.title()}: {_trim(text, 500)}"
         for role, text in turns
-        if role == "user"
     )
+    memory_hint = memory_context.query_rewrite_text() if memory_context else ""
 
     messages = [
         ChatMessage(
@@ -224,14 +229,18 @@ async def resolve_search_query(
             content=(
                 "Rewrite the latest user request into a standalone web-search query. "
                 "Preserve the exact event, company, year, location, and topic from the conversation context. "
-                "If the previous user message names a specific event, company, or product, keep that name in the query. "
+                "If the topic state contains a canonical event, company, or product name, keep that name in the query. "
+                "If user profile memory provides missing stable context such as location or persistent preference, use it only to resolve ambiguity. "
                 "Do not answer the question. Return only the rewritten query in the user's language."
             ),
         ),
         ChatMessage(
             role="user",
             content=(
-                f"Previous user messages:\n{user_history}\n\n"
+                f"Conversation history:\n{history}\n\n"
+                f"Topic hint:\n{_trim(topic_state.topic_hint, 400)}\n\n"
+                f"Canonical topic:\n{_trim(topic_state.canonical_topic, 220)}\n\n"
+                f"User profile memory:\n{_trim(memory_hint, 500)}\n\n"
                 f"Latest user request:\n{query}"
             ),
         ),
@@ -240,7 +249,7 @@ async def resolve_search_query(
     try:
         response = await mws_client.chat(messages, model=model_override, temperature=0.0)
         candidate = _clean_rewrite(response.content)
-        if candidate and _looks_like_valid_rewrite(candidate, previous_user):
+        if candidate and _looks_like_valid_rewrite(candidate, topic_seed or previous_user):
             return candidate
     except Exception:
         pass

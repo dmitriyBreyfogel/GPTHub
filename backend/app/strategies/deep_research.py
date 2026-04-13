@@ -53,6 +53,7 @@ class DeepResearchStrategy:
             original_query,
             request.context_messages,
             request.model_override,
+            request.memory_context,
         )
         state = await self._graph.ainvoke(
             {
@@ -61,6 +62,7 @@ class DeepResearchStrategy:
                 "user_id": request.user_id,
                 "model": request.model_override,
                 "generation_options": request.generation_options,
+                "profile_text": request.memory_context.profile_prompt_text() if request.memory_context else "",
             }
         )
         sources = state.get("sources", [])
@@ -98,7 +100,9 @@ class DeepResearchStrategy:
         messages = [
             ChatMessage(
                 role="system",
-                content=prompt_cache_manager.build_research_plan_system_prompt(),
+                content=prompt_cache_manager.build_research_plan_system_prompt(
+                    profile_text=state.get("profile_text", ""),
+                ),
             ),
             ChatMessage(role="user", content=query),
         ]
@@ -295,7 +299,9 @@ class DeepResearchStrategy:
         return [
             ChatMessage(
                 role="system",
-                content=prompt_cache_manager.build_research_synthesis_system_prompt(),
+                content=prompt_cache_manager.build_research_synthesis_system_prompt(
+                    profile_text=state.get("profile_text", ""),
+                ),
             ),
             ChatMessage(
                 role="user",
@@ -306,10 +312,11 @@ class DeepResearchStrategy:
                     f"{resolved_query}\n\n"
                     "Research plan:\n"
                     f"{plan_context}\n\n"
-                    "Collected sources:\n"
+                    "Collected sources JSON:\n"
                     f"{source_context}\n\n"
                     "Write a detailed answer grounded only in the collected sources. "
                     "Prefer official sources when available. "
+                    "Cite sources only by their numeric ids. "
                     "Call out missing data, weak evidence, and contradictions explicitly."
                 ),
             ),

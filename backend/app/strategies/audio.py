@@ -112,6 +112,7 @@ class AudioStrategy:
             generation_options=request.generation_options,
             workspace_id=request.workspace_id,
             workspace_instructions=request.workspace_instructions,
+            memory_context=request.memory_context,
         )
 
     def _text_context_messages(self, request: StrategyRequest, text: str) -> list[dict] | None:

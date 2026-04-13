@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from typing import AsyncIterator
 
@@ -26,9 +27,15 @@ class SearchStrategy:
             request.text,
             request.context_messages,
             request.model_override,
+            request.memory_context,
         )
         results = await self._search(request.text, search_query)
-        messages = self._build_messages(request.text, search_query, results)
+        messages = self._build_messages(
+            request.text,
+            search_query,
+            results,
+            request.memory_context.profile_prompt_text() if request.memory_context else "",
+        )
         response = await mws_client.chat(
             messages,
             model=request.model_override,
@@ -47,9 +54,15 @@ class SearchStrategy:
             request.text,
             request.context_messages,
             request.model_override,
+            request.memory_context,
         )
         results = await self._search(request.text, search_query)
-        messages = self._build_messages(request.text, search_query, results)
+        messages = self._build_messages(
+            request.text,
+            search_query,
+            results,
+            request.memory_context.profile_prompt_text() if request.memory_context else "",
+        )
         async for chunk in mws_client.chat_stream(
             messages,
             model=request.model_override,
@@ -107,6 +120,23 @@ class SearchStrategy:
             suffix = "официальный сайт" if re.search(r"[А-Яа-яЁё]", normalized_search) else "official site"
             queries.append(f"{normalized_search} {suffix}")
 
+        if any(
+            keyword in normalized_original
+            for keyword in (
+                "\u043a\u0440\u0438\u0442\u0435\u0440",
+                "\u043e\u0446\u0435\u043d\u043a",
+                "criteria",
+                "evaluation",
+                "judging",
+            )
+        ):
+            if re.search(r"[\u0410-\u042f\u0430-\u044f\u0401\u0451]", normalized_search):
+                queries.append(f"{normalized_search} \u043a\u0440\u0438\u0442\u0435\u0440\u0438\u0438 \u043e\u0446\u0435\u043d\u043a\u0438")
+                queries.append(f"{normalized_search} \u043e\u0446\u0435\u043d\u043a\u0430 \u043f\u0440\u043e\u0435\u043a\u0442\u043e\u0432")
+            else:
+                queries.append(f"{normalized_search} judging criteria")
+                queries.append(f"{normalized_search} evaluation criteria")
+
         deduped: list[str] = []
         seen: set[str] = set()
         for query in queries:
@@ -127,38 +157,52 @@ class SearchStrategy:
         original_query: str,
         search_query: str,
         results: list[SearchResult],
+        profile_text: str,
     ) -> list[ChatMessage]:
-        if results:
-            search_context = "\n\n".join(
-                self._format_result(index, result)
-                for index, result in enumerate(results, start=1)
-            )
-        else:
-            search_context = "Search did not return results or was temporarily unavailable."
+        search_context = self._search_context_payload(
+            original_query=original_query,
+            search_query=search_query,
+            results=results,
+        )
 
         return [
             ChatMessage(
                 role="system",
-                content=prompt_cache_manager.build_search_system_prompt(),
+                content=prompt_cache_manager.build_search_system_prompt(profile_text=profile_text),
             ),
             ChatMessage(
                 role="user",
                 content=(
-                    "Original user request:\n"
-                    f"{original_query}\n\n"
-                    "Resolved standalone search query:\n"
-                    f"{search_query}\n\n"
-                    "Search results:\n"
-                    f"{search_context}"
+                    "Search context JSON:\n"
+                    f"{search_context}\n\n"
+                    "Answer the user request using only this structured search context. "
+                    "Cite sources only by their numeric ids."
                 ),
             ),
         ]
 
-    def _format_result(self, index: int, result: SearchResult) -> str:
-        title = result.title.strip() or "Untitled"
-        url = result.url.strip()
-        snippet = self._trim(result.snippet.strip(), 700)
-        return f"[{index}] {title}\nURL: {url}\nSnippet: {snippet}"
+    def _search_context_payload(
+        self,
+        *,
+        original_query: str,
+        search_query: str,
+        results: list[SearchResult],
+    ) -> str:
+        payload = {
+            "original_query": original_query.strip(),
+            "resolved_query": search_query.strip(),
+            "result_count": len(results),
+            "results": [
+                {
+                    "id": index,
+                    "title": result.title.strip() or "Untitled",
+                    "url": result.url.strip(),
+                    "snippet": self._trim(result.snippet.strip(), 700),
+                }
+                for index, result in enumerate(results, start=1)
+            ],
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def _trim(self, text: str, limit: int) -> str:
         normalized = " ".join(text.split())

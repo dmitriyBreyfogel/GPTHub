@@ -6,8 +6,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.v1.chat_support.errors import exception_detail
 from app.api.v1.chat_support.files import request_file as resolve_request_file
+from app.api.v1.chat_support.memory_support import (
+    build_memory_context,
+    persist_memory,
+    request_memory_enabled,
+    resolve_user_id,
+)
 from app.api.v1.chat_support.openapi import CHAT_COMPLETIONS_OPENAPI_EXTRA
-from app.api.v1.chat_support.parsing import last_user_text, task_type_override
+from app.api.v1.chat_support.parsing import content_to_text, last_user_text, task_type_override
 from app.api.v1.chat_support.responses import (
     gpthub_metadata_from_decision,
     openai_response,
@@ -23,12 +29,21 @@ router = APIRouter()
 
 
 @router.post("/chat/completions", openapi_extra=CHAT_COMPLETIONS_OPENAPI_EXTRA)
-async def chat_completions(request: Request, x_user_id: str = Header("anonymous")):
+async def chat_completions(
+    request: Request,
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
+):
     body = await request.json()
-    user_id = x_user_id
+    user_id = resolve_user_id(
+        x_user_id=x_user_id,
+        x_openwebui_user_id=x_openwebui_user_id,
+    )
     user_text = last_user_text(body)
+    memory_enabled = request_memory_enabled(body)
     request_file = await resolve_request_file(body, user_id)
     request_workspace = await resolve_request_workspace(body, user_id, request.headers.get("x-workspace-id"))
+    memory_context = await build_memory_context(user_id, user_text, memory_enabled)
 
     decision = await model_router.route(
         user_text,
@@ -49,6 +64,7 @@ async def chat_completions(request: Request, x_user_id: str = Header("anonymous"
         user_text,
         request_file,
         request_workspace,
+        memory_context,
     )
 
     is_streaming = body.get("stream", False)
@@ -63,6 +79,12 @@ async def chat_completions(request: Request, x_user_id: str = Header("anonymous"
         try:
             strategy_response = await decision.strategy.execute(strategy_request)
             strategy_response = model_router.enrich_response(decision, strategy_response)
+            await persist_memory(
+                user_id=user_id,
+                query=user_text,
+                assistant_answer=strategy_response.content,
+                memory_context=memory_context,
+            )
             return JSONResponse(content=openai_response(strategy_response), headers=headers)
         except HTTPException:
             raise
@@ -71,7 +93,7 @@ async def chat_completions(request: Request, x_user_id: str = Header("anonymous"
 
     if is_streaming:
         return StreamingResponse(
-            upstream_stream_response(body, decision),
+            upstream_stream_response(body, decision, strategy_request),
             media_type="text/event-stream",
             headers=headers,
         )
@@ -91,6 +113,18 @@ async def chat_completions(request: Request, x_user_id: str = Header("anonymous"
             content = resp.json()
             if isinstance(content, dict):
                 content["gpthub"] = gpthub_metadata_from_decision(decision)
+                choices = content.get("choices")
+                if isinstance(choices, list) and choices:
+                    first_choice = choices[0]
+                    if isinstance(first_choice, dict):
+                        raw_message = first_choice.get("message")
+                        if isinstance(raw_message, dict):
+                            await persist_memory(
+                                user_id=user_id,
+                                query=user_text,
+                                assistant_answer=content_to_text(raw_message.get("content")),
+                                memory_context=memory_context,
+                            )
             return JSONResponse(content=content, headers=headers)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=exception_detail(exc))

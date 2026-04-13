@@ -66,7 +66,6 @@ class TextStrategyModelForwardingTests(unittest.IsolatedAsyncioTestCase):
                 "_build_messages",
                 new=AsyncMock(return_value=[ChatMessage(role="user", content=request.text)]),
             ),
-            patch.object(strategy, "_save_memory", new=AsyncMock()),
             patch("app.strategies.text.mws_client", fake_client),
         ):
             response = await strategy.execute(request)

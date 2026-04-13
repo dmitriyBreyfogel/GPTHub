@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.api.v1.chat_support.contracts import RequestFile, RequestWorkspace
+from app.memory.context import MemoryContext
 from app.api.v1.chat_support.openapi import GENERATION_OPTION_KEYS
 from app.core.router import RoutingDecision
 from app.strategies.base import StrategyRequest
@@ -13,6 +14,7 @@ def build_strategy_request(
     user_text: str,
     request_file: RequestFile,
     request_workspace: RequestWorkspace,
+    memory_context: MemoryContext,
 ) -> StrategyRequest:
     messages = body.get("messages")
     return StrategyRequest(
@@ -27,4 +29,5 @@ def build_strategy_request(
         generation_options={key: body[key] for key in GENERATION_OPTION_KEYS if key in body},
         workspace_id=request_workspace.workspace_id,
         workspace_instructions=request_workspace.instructions,
+        memory_context=memory_context,
     )
