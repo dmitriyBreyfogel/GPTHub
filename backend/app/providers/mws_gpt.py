@@ -9,9 +9,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.config import settings
 
 
-CHAT_TIMEOUT_SECONDS = 60.0
+CHAT_TIMEOUT_SECONDS = 180.0
 EMBEDDING_TIMEOUT_SECONDS = 30.0
-MEDIA_TIMEOUT_SECONDS = 120.0
+MEDIA_TIMEOUT_SECONDS = 300.0
 
 
 @dataclass
