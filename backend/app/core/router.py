@@ -72,6 +72,7 @@ class ModelRouter:
         task_type_override: str | None = None,
         file_content_type: str | None = None,
         file_name: str | None = None,
+        context_messages: list[dict] | None = None,
     ) -> RoutingDecision:
         normalized_task_type_override = self._parse_task_type(task_type_override)
         normalized_model_override = self._normalize_model_override(model_override)
@@ -83,16 +84,19 @@ class ModelRouter:
             )
 
         if normalized_model_override is not None:
-            return self._manual_model_decision(
+            return await self._manual_model_decision(
+                text=text,
                 model=normalized_model_override,
                 file_content_type=file_content_type,
                 file_name=file_name,
+                context_messages=context_messages,
             )
 
         return await self._auto_decision(
             text,
             file_content_type=file_content_type,
             file_name=file_name,
+            context_messages=context_messages,
         )
 
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
@@ -102,6 +106,7 @@ class ModelRouter:
             model_override=request.model_override,
             file_content_type=request.file_content_type,
             file_name=request.file_name,
+            context_messages=request.context_messages,
         )
         if decision.strategy is None:
             raise LookupError(f"Strategy for task type `{decision.task_type.value}` is not registered")
@@ -151,12 +156,14 @@ class ModelRouter:
             manual_override=True,
         )
 
-    def _manual_model_decision(
+    async def _manual_model_decision(
         self,
         *,
+        text: str,
         model: str,
         file_content_type: str | None,
         file_name: str | None,
+        context_messages: list[dict] | None,
     ) -> RoutingDecision:
         file_task_type = task_type_from_file(
             file_content_type=file_content_type,
@@ -175,6 +182,26 @@ class ModelRouter:
             file_content_type=file_content_type,
             file_name=file_name,
         )
+        if task_type == TaskType.TEXT:
+            classification = await self._classifier.classify(
+                text,
+                file_content_type=file_content_type,
+                file_name=file_name,
+                context_messages=context_messages,
+            )
+            if classification.task_type in {TaskType.SEARCH, TaskType.WEB_PARSE}:
+                return RoutingDecision(
+                    task_type=classification.task_type,
+                    model=model,
+                    routing_reason=(
+                        f"Manual model `{model}` preserved. "
+                        f"{classification.routing_reason}"
+                    ),
+                    strategy=self.get_strategy(classification.task_type),
+                    confidence=classification.confidence,
+                    method=f"{classification.method}_manual_model",
+                    manual_override=False,
+                )
         return RoutingDecision(
             task_type=task_type,
             model=model,
@@ -233,11 +260,13 @@ class ModelRouter:
         *,
         file_content_type: str | None,
         file_name: str | None,
+        context_messages: list[dict] | None,
     ) -> RoutingDecision:
         classification = await self._classifier.classify(
             text,
             file_content_type=file_content_type,
             file_name=file_name,
+            context_messages=context_messages,
         )
         selected_model = self._default_model_for_task(classification.task_type)
         return self._decision_from_classification(classification, selected_model)

@@ -13,10 +13,113 @@ from app.providers.mws_gpt import ChatMessage, mws_client
 
 
 URL_PATTERN = re.compile(r"https?://[^\s<>)\"']+")
+YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 DEFAULT_AUTO_TASK_TYPES = tuple(
     task_type
     for task_type in TaskType
     if task_type != TaskType.DEEP_RESEARCH
+)
+
+SEARCH_WEB_MARKERS = (
+    "official",
+    "official page",
+    "official site",
+    "official website",
+    "latest",
+    "recent",
+    "news",
+    "now",
+    "currently",
+    "today",
+    "current",
+    "up-to-date",
+    "source",
+    "sources",
+    "registration",
+    "deadline",
+    "criteria",
+    "results",
+    "winner",
+    "winners",
+    "schedule",
+    "официаль",
+    "свеж",
+    "последн",
+    "новост",
+    "сегодня",
+    "актуаль",
+    "источник",
+    "источники",
+    "регистра",
+    "дедлайн",
+    "критер",
+    "результат",
+    "итог",
+    "победител",
+    "расписан",
+    "сейчас",
+    "услов",
+    "правил",
+)
+
+FACT_REQUEST_MARKERS = (
+    "?",
+    "what",
+    "when",
+    "where",
+    "who",
+    "which",
+    "how much",
+    "details",
+    "report",
+    "analysis",
+    "summary",
+    "overview",
+    "какой",
+    "какая",
+    "какие",
+    "какое",
+    "когда",
+    "где",
+    "кто",
+    "сколько",
+    "отчет",
+    "отчёт",
+    "анализ",
+    "сводк",
+    "детал",
+)
+
+TRANSFORM_MARKERS = (
+    "translate",
+    "rewrite",
+    "rephrase",
+    "summarize this text",
+    "improve the text",
+    "переведи",
+    "перепиши",
+    "сократи текст",
+    "улучши текст",
+    "исправь текст",
+)
+
+DIRECT_RUNTIME_QUESTION_MARKERS = (
+    "какой сейчас год",
+    "какая сейчас дата",
+    "какое сегодня число",
+    "какая сегодня дата",
+    "какой сегодня день",
+    "сколько сейчас времени",
+    "который час",
+    "what year is it",
+    "what is the current year",
+    "what date is it",
+    "what is the date today",
+    "what day is it today",
+    "what time is it",
+    "current year",
+    "current date",
+    "current time",
 )
 
 
@@ -123,6 +226,126 @@ def _extract_json_object(text: str) -> dict | None:
     return None
 
 
+def _normalize(text: str) -> str:
+    return " ".join((text or "").strip().lower().split())
+
+
+def _message_content_to_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+
+    parts: list[str] = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        item_text = item.get("text")
+        if isinstance(item_text, str):
+            parts.append(item_text)
+    return "\n".join(parts)
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    normalized = _normalize(text)
+    return any(marker in normalized for marker in markers)
+
+
+def _looks_like_information_request(text: str) -> bool:
+    normalized = _normalize(text)
+    if not normalized:
+        return False
+    return _contains_any(normalized, FACT_REQUEST_MARKERS)
+
+
+def _looks_like_transform_request(text: str) -> bool:
+    normalized = _normalize(text)
+    if not normalized:
+        return False
+    return _contains_any(normalized, TRANSFORM_MARKERS)
+
+
+def _looks_like_runtime_question(text: str) -> bool:
+    normalized = _normalize(text)
+    if not normalized:
+        return False
+    return _contains_any(normalized, DIRECT_RUNTIME_QUESTION_MARKERS)
+
+
+def _previous_user_text(context_messages: list[dict] | None, current_text: str) -> str:
+    current_normalized = _normalize(current_text)
+    previous_user = ""
+    for raw_message in context_messages or []:
+        if not isinstance(raw_message, dict) or raw_message.get("role") != "user":
+            continue
+        content = _message_content_to_text(raw_message.get("content"))
+        if not content.strip():
+            continue
+        if _normalize(content) == current_normalized:
+            continue
+        previous_user = content
+    return previous_user
+
+
+def _last_sourced_assistant_message(context_messages: list[dict] | None) -> dict | None:
+    for raw_message in reversed(context_messages or []):
+        if not isinstance(raw_message, dict) or raw_message.get("role") != "assistant":
+            continue
+        sources = raw_message.get("sources")
+        if isinstance(sources, list) and any(isinstance(item, str) and item.strip() for item in sources):
+            return raw_message
+        content = _message_content_to_text(raw_message.get("content"))
+        if len(URL_PATTERN.findall(content)) >= 2:
+            return raw_message
+    return None
+
+
+def _classify_by_search_need(
+    text: str,
+    context_messages: list[dict] | None = None,
+) -> TaskClassification | None:
+    normalized = _normalize(text)
+    if not normalized or URL_PATTERN.search(normalized):
+        return None
+
+    if _looks_like_runtime_question(normalized):
+        return None
+
+    if _contains_any(normalized, SEARCH_WEB_MARKERS):
+        return TaskClassification(
+            task_type=TaskType.SEARCH,
+            routing_reason="Запрос похож на поиск актуальной или внешней информации в интернете.",
+            confidence=0.9,
+            method="search_heuristic",
+        )
+
+    if YEAR_PATTERN.search(normalized) and _contains_any(normalized, FACT_REQUEST_MARKERS):
+        return TaskClassification(
+            task_type=TaskType.SEARCH,
+            routing_reason="В запросе есть год и запрос на факты или отчет, поэтому включен веб-поиск.",
+            confidence=0.84,
+            method="search_heuristic",
+        )
+
+    last_sourced_assistant = _last_sourced_assistant_message(context_messages)
+    if last_sourced_assistant and _looks_like_information_request(normalized) and not _looks_like_transform_request(normalized):
+        previous_user = _previous_user_text(context_messages, text)
+        assistant_text = _message_content_to_text(last_sourced_assistant.get("content"))
+        context_seed = f"{previous_user}\n{assistant_text}"
+        if YEAR_PATTERN.search(context_seed) or _contains_any(context_seed, SEARCH_WEB_MARKERS):
+            return TaskClassification(
+                task_type=TaskType.SEARCH,
+                routing_reason="Похоже на follow-up вопрос по предыдущему ответу с источниками, продолжаю веб-поиск по теме.",
+                confidence=0.82,
+                method="search_context",
+            )
+
+    return None
+
+
 class TaskClassifier:
     def __init__(
         self,
@@ -141,6 +364,7 @@ class TaskClassifier:
         *,
         file_content_type: str | None = None,
         file_name: str | None = None,
+        context_messages: list[dict] | None = None,
     ) -> TaskClassification:
         mime = file_content_type or infer_mime_from_filename(file_name)
         mime_result = _classify_by_mime(mime)
@@ -150,6 +374,10 @@ class TaskClassifier:
         text_shape_result = _classify_by_text_shape(text)
         if text_shape_result:
             return text_shape_result
+
+        search_need_result = _classify_by_search_need(text, context_messages)
+        if search_need_result:
+            return search_need_result
 
         try:
             semantic = await self._classify_semantic(text)

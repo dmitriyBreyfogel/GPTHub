@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import AsyncIterator
 
 import app.memory.mem0_client as mem0_module
@@ -58,11 +59,21 @@ class TextStrategy:
     async def _build_system_prompt(self, request: StrategyRequest) -> str:
         profile_text = await self._profile_text(request.user_id)
         memory_text = await self._memory_text(request.text, request.user_id)
-        return prompt_cache_manager.build_text_system_prompt(
+        base_prompt = prompt_cache_manager.build_text_system_prompt(
             profile_text=profile_text,
             memory_text=memory_text,
             workspace_instructions=request.workspace_instructions,
         )
+        current_dt = datetime.now().astimezone()
+        runtime_context = (
+            "Текущие дата и время сервера:\n"
+            f"- ISO: {current_dt.isoformat()}\n"
+            f"- Local date: {current_dt.strftime('%Y-%m-%d')}\n"
+            f"- Local time: {current_dt.strftime('%H:%M:%S %z')}\n"
+            f"- Current year: {current_dt.year}\n"
+            "Используй эти значения для вопросов про сейчас, сегодня, текущую дату, время и год."
+        )
+        return f"{base_prompt}\n\n{runtime_context}"
 
     async def _profile_text(self, user_id: str) -> str:
         try:

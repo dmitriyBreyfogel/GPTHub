@@ -37,6 +37,7 @@ async def chat_completions(request: Request, x_user_id: str = Header("anonymous"
         task_type_override=task_type_override(body),
         file_content_type=request_file.file_content_type,
         file_name=request_file.file_name,
+        context_messages=body.get("messages") if isinstance(body.get("messages"), list) else None,
     )
     body["model"] = decision.model
 

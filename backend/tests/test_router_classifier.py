@@ -37,12 +37,14 @@ class _RecordingClassifier:
         *,
         file_content_type: str | None = None,
         file_name: str | None = None,
+        context_messages: list[dict] | None = None,
     ) -> TaskClassification:
         self.calls.append(
             {
                 "text": text,
                 "file_content_type": file_content_type,
                 "file_name": file_name,
+                "context_messages": context_messages,
             }
         )
         return self.classification
@@ -169,6 +171,61 @@ class TaskClassifierTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(TaskType.WEB_PARSE, result.task_type)
         self.assertEqual("text_shape", result.method)
 
+    async def test_search_heuristic_routes_official_or_fresh_queries_to_web_search(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))
+        classifier._classify_llm = AsyncMock(side_effect=AssertionError("llm must not run"))
+
+        result = await classifier.classify("Найди официальную страницу МТС True Hack 2026")
+
+        self.assertEqual(TaskType.SEARCH, result.task_type)
+        self.assertEqual("search_heuristic", result.method)
+
+    async def test_search_heuristic_routes_current_external_fact_queries_to_web_search(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))
+        classifier._classify_llm = AsyncMock(side_effect=AssertionError("llm must not run"))
+
+        result = await classifier.classify("Кто сейчас президент США?")
+
+        self.assertEqual(TaskType.SEARCH, result.task_type)
+        self.assertEqual("search_heuristic", result.method)
+
+    async def test_direct_runtime_question_does_not_force_web_search(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(return_value=None)
+        classifier._classify_llm = AsyncMock(return_value=None)
+
+        result = await classifier.classify("Какой сейчас год?")
+
+        self.assertEqual(TaskType.TEXT, result.task_type)
+        self.assertEqual("fallback", result.method)
+
+    async def test_follow_up_after_sourced_answer_routes_to_search(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))
+        classifier._classify_llm = AsyncMock(side_effect=AssertionError("llm must not run"))
+
+        context_messages = [
+            {"role": "user", "content": "Сделай отчет по МТС True Hack 2026"},
+            {
+                "role": "assistant",
+                "content": "Отчет с источниками\nhttps://truetechhack.ru/\nhttps://truetecharena.ru/contests/true-tech-hack2026",
+                "sources": [
+                    "https://truetechhack.ru/",
+                    "https://truetecharena.ru/contests/true-tech-hack2026",
+                ],
+            },
+        ]
+
+        result = await classifier.classify(
+            "Какие были основные критерии оценки проектов?",
+            context_messages=context_messages,
+        )
+
+        self.assertEqual(TaskType.SEARCH, result.task_type)
+        self.assertEqual("search_context", result.method)
+
     async def test_semantic_router_handles_diverse_prompt_shapes(self) -> None:
         classifier = TaskClassifier(semantic_threshold=0.3, semantic_margin=0.01)
         classifier._centroids = {
@@ -272,6 +329,23 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(strategy, decision.strategy)
         self.assertEqual(1, len(classifier.calls))
 
+    async def test_route_passes_context_messages_to_classifier(self) -> None:
+        classifier = _RecordingClassifier(_classification(TaskType.SEARCH))
+        router = ModelRouter(classifier=classifier)
+        context_messages = [
+            {"role": "user", "content": "Сделай отчет по МТС True Hack 2026"},
+            {"role": "assistant", "content": "Ответ с источниками", "sources": ["https://truetechhack.ru/"]},
+        ]
+
+        await router.route(
+            "Какие были основные критерии оценки проектов?",
+            user_id="user-1",
+            model_override="auto",
+            context_messages=context_messages,
+        )
+
+        self.assertEqual(context_messages, classifier.calls[0]["context_messages"])
+
     async def test_all_auto_aliases_use_classifier(self) -> None:
         for alias in (None, "auto", "gpthub-auto", "gpthub_auto", "automatic"):
             with self.subTest(alias=alias):
@@ -289,7 +363,7 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual("semantic", decision.method)
                 self.assertEqual(1, len(classifier.calls))
 
-    async def test_explicit_model_bypasses_text_classifier_and_is_preserved(self) -> None:
+    async def test_explicit_text_model_can_auto_route_search_and_still_preserve_model(self) -> None:
         classifier = _RecordingClassifier(_classification(TaskType.SEARCH))
         router = ModelRouter(classifier=classifier)
 
@@ -299,11 +373,27 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
             model_override="custom-text-model",
         )
 
+        self.assertEqual(TaskType.SEARCH, decision.task_type)
+        self.assertEqual("custom-text-model", decision.model)
+        self.assertEqual("semantic_manual_model", decision.method)
+        self.assertFalse(decision.manual_override)
+        self.assertEqual(1, len(classifier.calls))
+
+    async def test_explicit_text_model_stays_manual_for_regular_text_requests(self) -> None:
+        classifier = _RecordingClassifier(_classification(TaskType.TEXT))
+        router = ModelRouter(classifier=classifier)
+
+        decision = await router.route(
+            "Explain JWT validation",
+            user_id="user-1",
+            model_override="custom-text-model",
+        )
+
         self.assertEqual(TaskType.TEXT, decision.task_type)
         self.assertEqual("custom-text-model", decision.model)
         self.assertEqual("manual_model", decision.method)
         self.assertTrue(decision.manual_override)
-        self.assertEqual([], classifier.calls)
+        self.assertEqual(1, len(classifier.calls))
 
     async def test_manual_task_type_with_explicit_model_preserves_model(self) -> None:
         classifier = _RecordingClassifier(_classification(TaskType.TEXT))
