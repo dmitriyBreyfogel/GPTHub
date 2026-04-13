@@ -218,6 +218,9 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(marker, prompt)
         self.assertIn("6-10", prompt)
         self.assertIn("1-2", prompt)
+        self.assertIn("Сначала проектируй содержание", prompt)
+        self.assertIn("дошкольных", prompt)
+        self.assertIn("не фоновую сцену", prompt)
 
     async def test_execute_returns_markdown_download_link(self) -> None:
         strategy = PresentationStrategy()
@@ -325,6 +328,41 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(b"image-bytes", slides[1].image_bytes)
         self.assertEqual(settings.image_generation_model, fake_client.image_calls[0]["model"])
         self.assertIn("no text", fake_client.image_calls[0]["prompt"])
+        self.assertIn("spot illustration", fake_client.image_calls[0]["prompt"])
+        self.assertIn("not a full-slide background", fake_client.image_calls[0]["prompt"])
+
+    async def test_enrich_slides_converts_extra_image_layouts_to_content(self) -> None:
+        strategy = PresentationStrategy()
+        strategy.max_generated_images = 1
+        slides = [
+            SlideSpec(
+                title="Материалы",
+                bullets=[],
+                body="Дети рассматривают лейку, совок, землю и рассаду перед началом занятия.",
+                image_prompt="Плоская иконка лейки, совка и рассады",
+                layout="image_text",
+            ),
+            SlideSpec(
+                title="Полив после посадки",
+                bullets=["Льем воду ближе к корню", "Не размываем землю", "Проверяем влажность"],
+                takeaway="Аккуратный полив помогает цветку прижиться.",
+                image_prompt="Плоская иконка лейки рядом с цветком",
+                layout="image_text",
+            ),
+        ]
+
+        with (
+            patch.object(strategy, "_generate_image_url", new=AsyncMock(return_value="https://cdn.example/icon.png")) as generate,
+            patch.object(strategy, "_fetch_image_bytes", new=AsyncMock(return_value=b"image-bytes")),
+        ):
+            enriched = await strategy._enrich_slides_with_images(slides)
+
+        self.assertEqual("image_text", enriched[0].layout)
+        self.assertEqual(b"image-bytes", enriched[0].image_bytes)
+        self.assertEqual("content", enriched[1].layout)
+        self.assertIsNone(enriched[1].image_bytes)
+        self.assertEqual("", enriched[1].image_url)
+        self.assertEqual(1, generate.call_count)
 
     def test_build_pptx_uses_designed_widescreen_layout(self) -> None:
         strategy = PresentationStrategy()
@@ -371,6 +409,15 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(deck.slides[1].shapes), 12)
         self.assertGreater(len(deck.slides[2].shapes), 6)
         self.assertGreater(len(deck.slides[3].shapes), 6)
+        visible_text = "\n".join(
+            shape.text
+            for slide in deck.slides
+            for shape in slide.shapes
+            if hasattr(shape, "text")
+        )
+        self.assertNotIn("Визуальный слайд", visible_text)
+        self.assertNotIn("Единый корпоративный чат с AI-ассистентом", visible_text)
+        self.assertNotIn("Схема из трех блоков", visible_text)
 
 
 class ResponseMetadataTests(unittest.TestCase):

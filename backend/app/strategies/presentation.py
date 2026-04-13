@@ -232,8 +232,11 @@ class PresentationStrategy:
         enriched = []
         generated = 0
         for slide in slides:
-            if generated >= self.max_generated_images or not self._should_generate_image(slide):
+            if not self._should_generate_image(slide):
                 enriched.append(slide)
+                continue
+            if generated >= self.max_generated_images:
+                enriched.append(self._content_layout_for_image_fallback(slide))
                 continue
 
             prompt = self._image_generation_prompt(slide)
@@ -241,18 +244,27 @@ class PresentationStrategy:
                 image_url = slide.image_url or await self._generate_image_url(prompt)
                 image_bytes = await self._fetch_image_bytes(image_url)
             except Exception:
-                enriched.append(slide)
+                enriched.append(self._content_layout_for_image_fallback(slide))
                 continue
 
             if image_bytes:
                 generated += 1
                 enriched.append(replace(slide, image_url=image_url, image_bytes=image_bytes))
             else:
-                enriched.append(replace(slide, image_url=image_url))
+                enriched.append(self._content_layout_for_image_fallback(slide))
         return enriched
 
     def _should_generate_image(self, slide: SlideSpec) -> bool:
         return slide.layout in {"image", "image_text"} and bool(slide.image_prompt or slide.visual_hint)
+
+    def _content_layout_for_image_fallback(self, slide: SlideSpec) -> SlideSpec:
+        if slide.layout not in {"image", "image_text"}:
+            return slide
+
+        text_content = slide.body or slide.takeaway or slide.subtitle
+        layout = "text" if text_content and not slide.bullets else "content"
+        body = slide.body or (text_content if layout == "text" else "")
+        return replace(slide, layout=layout, body=body, image_url="", image_bytes=None)
 
     async def _generate_image_url(self, prompt: str) -> str:
         try:
@@ -289,8 +301,9 @@ class PresentationStrategy:
         prompt = slide.image_prompt or slide.visual_hint or slide.title
         return (
             f"{prompt}. "
-            "Corporate presentation illustration, clean editorial style, no text, no logos, "
-            "high contrast, professional lighting, 16:9 composition."
+            "Simple flat vector spot illustration or icon for a presentation slide, isolated on a light background, "
+            "friendly minimal style, no text, no letters, no logos, no watermark, not photorealistic, "
+            "not a full-slide background."
         )
 
     def _fallback_slides(self, topic: str) -> list[SlideSpec]:
@@ -427,9 +440,6 @@ class PresentationStrategy:
         insight = spec.takeaway or "Ключевая мысль презентации"
         self._textbox(slide, "Фокус", 10.3, 1.18, 2.45, 0.38, font_size=12, color=self._white, bold=True)
         self._textbox(slide, insight, 10.3, 1.65, 2.15, 1.55, font_size=19, color=self._white, bold=True)
-        if spec.visual_hint:
-            self._textbox(slide, spec.visual_hint, 10.3, 4.85, 2.2, 0.95, font_size=12, color=self._white)
-
         self._add_footer(slide, slide_number, total_slides, accent, dark=True)
         self._apply_notes(slide, spec.speaker_notes)
 
@@ -529,8 +539,6 @@ class PresentationStrategy:
         self._shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, 9.35, 1.28, 2.95, 4.85, self._dark)
         self._textbox(slide, "Вывод", 9.72, 1.72, 2.2, 0.32, font_size=12, color=accent, bold=True)
         self._textbox(slide, spec.takeaway or self._derive_takeaway(spec), 9.72, 2.25, 2.18, 1.5, font_size=18, color=self._white, bold=True)
-        if spec.visual_hint:
-            self._textbox(slide, spec.visual_hint, 9.72, 4.78, 2.1, 0.75, font_size=11, color=RGBColor(224, 230, 239))
         self._add_footer(slide, slide_number, total_slides, accent, dark=False)
         self._apply_notes(slide, spec.speaker_notes)
 
@@ -662,22 +670,27 @@ class PresentationStrategy:
     ) -> None:
         slide = self._blank_slide(deck)
         accent = self._accent_for(slide_number)
-        self._shape(slide, MSO_SHAPE.RECTANGLE, 0, 0, self._slide_width, self._slide_height, self._dark)
+        self._add_light_background(slide, accent)
+        self._add_header(slide, spec, accent)
+
         if spec.layout == "image_text":
-            self._shape(slide, MSO_SHAPE.RECTANGLE, 0, 0, 4.85, self._slide_height, self._dark)
-            self._textbox(slide, spec.title, 0.75, 0.9, 3.65, 0.9, font_size=28, color=self._white, bold=True)
             text = spec.body or spec.takeaway or self._derive_takeaway(spec)
-            self._textbox(slide, text, 0.78, 2.25, 3.55, 1.95, font_size=17, color=RGBColor(224, 230, 239), bold=True)
+            self._shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, 0.82, 1.82, 7.12, 3.92, self._card, self._line)
+            self._shape(slide, MSO_SHAPE.RECTANGLE, 0.82, 1.82, 0.14, 3.92, accent)
+            self._textbox(slide, text, 1.18, 2.16, 6.25, 1.42, font_size=21, color=self._ink, bold=True)
             for index, bullet in enumerate((spec.bullets or [])[:3]):
-                self._pill(slide, bullet, 0.8, 4.65 + index * 0.54, 3.4, 0.36, RGBColor(38, 48, 63))
-            self._image_box(slide, spec, 4.85, 0, 8.48, self._slide_height, accent, full_bleed=True)
+                top = 4.02 + index * 0.5
+                self._shape(slide, MSO_SHAPE.OVAL, 1.18, top + 0.05, 0.26, 0.26, accent)
+                self._textbox(slide, bullet, 1.62, top, 5.75, 0.34, font_size=13, color=self._ink, bold=True)
+            self._image_box(slide, spec, 8.48, 1.84, 3.72, 3.88, accent)
         else:
-            self._image_box(slide, spec, 0, 0, self._slide_width, self._slide_height, accent, full_bleed=True)
-            self._shape(slide, MSO_SHAPE.RECTANGLE, 0.72, 4.95, 7.75, 1.52, RGBColor(18, 24, 32))
-            self._shape(slide, MSO_SHAPE.RECTANGLE, 0.72, 4.95, 0.12, 1.52, accent)
-            self._textbox(slide, spec.title, 1.02, 5.18, 6.85, 0.58, font_size=26, color=self._white, bold=True)
-            self._textbox(slide, spec.takeaway or spec.subtitle or spec.visual_hint, 1.04, 5.83, 6.65, 0.36, font_size=12, color=RGBColor(224, 230, 239))
-        self._add_footer(slide, slide_number, total_slides, accent, dark=True)
+            self._image_box(slide, spec, 3.42, 1.72, 6.48, 3.72, accent)
+            caption = spec.body or spec.takeaway or spec.subtitle
+            if caption:
+                self._textbox(slide, caption, 2.1, 5.75, 9.05, 0.38, font_size=15, color=self._ink, bold=True, align=PP_ALIGN.CENTER)
+
+        self._takeaway_band(slide, spec, accent)
+        self._add_footer(slide, slide_number, total_slides, accent, dark=False)
         self._apply_notes(slide, spec.speaker_notes)
 
     def _add_bullet_cards(self, slide, spec: SlideSpec, accent: RGBColor) -> None:
@@ -736,9 +749,9 @@ class PresentationStrategy:
             color=self._white,
             bold=True,
         )
-        hint = spec.visual_hint or self._visual_hint_for(spec)
-        self._textbox(slide, "Визуальный акцент", 9.55, 4.35, 2.45, 0.32, font_size=11, color=RGBColor(205, 214, 226), bold=True)
-        self._textbox(slide, hint, 9.55, 4.78, 2.32, 0.85, font_size=12, color=RGBColor(224, 230, 239))
+        detail = spec.subtitle or spec.body or self._derive_takeaway(spec)
+        self._textbox(slide, "Контекст", 9.55, 4.35, 2.45, 0.32, font_size=11, color=RGBColor(205, 214, 226), bold=True)
+        self._textbox(slide, detail, 9.55, 4.78, 2.32, 0.85, font_size=12, color=RGBColor(224, 230, 239))
 
     def _add_light_background(self, slide, accent: RGBColor) -> None:
         self._shape(slide, MSO_SHAPE.RECTANGLE, 0, 0, self._slide_width, self._slide_height, self._paper)
@@ -819,12 +832,20 @@ class PresentationStrategy:
             except Exception:
                 pass
 
-        fill = RGBColor(32, 42, 56) if full_bleed else self._dark
-        self._shape(slide, MSO_SHAPE.RECTANGLE, left, top, width, height, fill)
-        self._shape(slide, MSO_SHAPE.RECTANGLE, left, top, 0.18, height, accent)
-        self._shape(slide, MSO_SHAPE.OVAL, left + width - 2.35, top + 0.78, 1.55, 1.55, accent)
-        self._textbox(slide, "Визуальный слайд", left + 0.55, top + height / 2 - 0.42, width - 1.2, 0.35, font_size=18, color=self._white, bold=True)
-        self._textbox(slide, spec.visual_hint or spec.image_prompt or spec.title, left + 0.55, top + height / 2 + 0.12, width - 1.2, 0.58, font_size=12, color=RGBColor(224, 230, 239))
+        fill = RGBColor(244, 247, 250) if full_bleed else self._card
+        self._shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height, fill, self._line)
+        self._shape(slide, MSO_SHAPE.RECTANGLE, left, top, width, 0.12, accent)
+
+        center_x = left + width / 2
+        center_y = top + height / 2
+        soft = RGBColor(228, 234, 242)
+        muted = RGBColor(112, 118, 128)
+
+        self._shape(slide, MSO_SHAPE.OVAL, center_x - 0.95, center_y - 0.95, 1.9, 1.9, soft, soft)
+        self._shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, center_x - 0.62, center_y - 0.32, 1.24, 0.9, accent, accent)
+        self._shape(slide, MSO_SHAPE.OVAL, center_x - 0.38, center_y - 0.03, 0.28, 0.28, self._white, self._white)
+        self._shape(slide, MSO_SHAPE.OVAL, center_x + 0.1, center_y - 0.03, 0.28, 0.28, self._white, self._white)
+        self._shape(slide, MSO_SHAPE.RECTANGLE, center_x - 0.42, center_y + 0.78, 0.84, 0.1, muted, muted)
 
     def _add_footer(self, slide, slide_number: int, total_slides: int, accent: RGBColor, *, dark: bool) -> None:
         track = RGBColor(58, 68, 82) if dark else self._line
@@ -853,10 +874,10 @@ class PresentationStrategy:
         if spec.left_items or spec.right_items:
             left = spec.left_items or spec.bullets[: max(1, len(spec.bullets) // 2)]
             right = spec.right_items or spec.bullets[max(1, len(spec.bullets) // 2) :]
-            return left or [spec.takeaway or spec.title], right or [spec.visual_hint or spec.title]
+            return left or [spec.takeaway or spec.title], right or [spec.takeaway or spec.title]
         bullets = spec.bullets or [spec.takeaway or spec.title]
         midpoint = max(1, (len(bullets) + 1) // 2)
-        return bullets[:midpoint], bullets[midpoint:] or [spec.visual_hint or spec.takeaway or spec.title]
+        return bullets[:midpoint], bullets[midpoint:] or [spec.takeaway or spec.title]
 
     def _split_metric(self, metric: str) -> tuple[str, str]:
         for separator in (" - ", ": "):
