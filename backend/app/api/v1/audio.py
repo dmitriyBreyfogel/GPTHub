@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.file_types import normalize_content_type
 from app.providers.mws_gpt import mws_client
 
 router = APIRouter()
@@ -40,10 +41,11 @@ async def transcribe_audio(
         raise HTTPException(status_code=400, detail="Empty audio file")
 
     try:
+        content_type = normalize_content_type(file.content_type, filename=file.filename) or "audio/wav"
         text = await mws_client.transcribe(
             audio_bytes=data,
             filename=file.filename or "audio.wav",
-            content_type=file.content_type or "audio/wav",
+            content_type=content_type,
             model=model,
         )
     except Exception as exc:

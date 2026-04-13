@@ -9,6 +9,23 @@ AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 DOCUMENT_EXTENSIONS = {".pdf", ".txt", ".md", ".csv", ".json", ".docx", ".doc", ".pptx", ".ppt"}
 
+AUDIO_MIME_ALIASES = {
+    "audio/mp3": "audio/mpeg",
+    "audio/x-mp3": "audio/mpeg",
+    "audio/wave": "audio/wav",
+    "audio/x-wav": "audio/wav",
+    "audio/vnd.wave": "audio/wav",
+}
+
+AUDIO_EXTENSION_MIME_TYPES = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/m4a",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+}
+
 DOCUMENT_MIME_TYPES = {
     "application/pdf",
     "text/plain",
@@ -25,7 +42,7 @@ def infer_mime_from_filename(filename: str | None) -> str | None:
     if suffix in IMAGE_EXTENSIONS:
         return f"image/{'jpeg' if suffix in {'.jpg', '.jpeg'} else suffix.lstrip('.')}"
     if suffix in AUDIO_EXTENSIONS:
-        return f"audio/{suffix.lstrip('.')}"
+        return AUDIO_EXTENSION_MIME_TYPES.get(suffix, f"audio/{suffix.lstrip('.')}")
     if suffix in VIDEO_EXTENSIONS:
         return f"video/{suffix.lstrip('.')}"
     if suffix == ".pdf":
@@ -91,11 +108,20 @@ def has_document_input(*, file_content_type: str | None, file_name: str | None) 
     return _suffix(file_name) in DOCUMENT_EXTENSIONS
 
 
+def normalize_content_type(value: str | None, *, filename: str | None = None) -> str | None:
+    normalized = _normalized_mime(value)
+    if normalized:
+        return normalized
+    return infer_mime_from_filename(filename)
+
+
 def _normalized_mime(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = value.lower().strip()
-    return normalized or None
+    if not normalized:
+        return None
+    return AUDIO_MIME_ALIASES.get(normalized, normalized)
 
 
 def _suffix(filename: str | None) -> str:

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 
+from app.core.file_types import normalize_content_type
 from app.storage.files import file_storage
 
 router = APIRouter()
@@ -14,10 +15,11 @@ async def upload_file(file: UploadFile, x_user_id: str = Header(...)):
     if len(data) > _MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
 
+    content_type = normalize_content_type(file.content_type, filename=file.filename) or "application/octet-stream"
     stored = await file_storage.upload(
         file_bytes=data,
         filename=file.filename or "upload",
-        content_type=file.content_type or "application/octet-stream",
+        content_type=content_type,
         user_id=x_user_id,
     )
     return {

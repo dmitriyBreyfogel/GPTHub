@@ -7,6 +7,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
+from app.core.file_types import normalize_content_type
 
 
 CHAT_TIMEOUT_SECONDS = 180.0
@@ -113,11 +114,12 @@ class MWSGPTClient:
         content_type: str = "audio/wav",
         model: str | None = None,
     ) -> str:
+        normalized_content_type = normalize_content_type(content_type, filename=filename) or "audio/wav"
         async with httpx.AsyncClient(timeout=MEDIA_TIMEOUT_SECONDS) as client:
             resp = await client.post(
                 self._url("/audio/transcriptions"),
                 headers=self._auth_headers(),
-                files={"file": (filename, audio_bytes, content_type)},
+                files={"file": (filename, audio_bytes, normalized_content_type)},
                 data={"model": model or settings.asr_model},
             )
             resp.raise_for_status()
