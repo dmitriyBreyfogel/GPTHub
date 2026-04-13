@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import AsyncIterator, Protocol, runtime_checkable
 
+from app.memory.context import MemoryContext
+
 
 class TaskType(StrEnum):
     RUNTIME = "runtime"
@@ -31,6 +33,7 @@ class StrategyRequest:
     generation_options: dict | None = None
     workspace_id: str | None = None
     workspace_instructions: str = ""
+    memory_context: MemoryContext | None = None
 
 
 @dataclass

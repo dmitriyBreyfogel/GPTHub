@@ -25,6 +25,12 @@ class UserProfile:
             lines.append(f"Пользователь: {self.name}")
         if self.role:
             lines.append(f"Роль: {self.role}")
+        preference_lines = []
+        for key, value in self.preferences.items():
+            if isinstance(value, str) and value.strip():
+                preference_lines.append(f"{key}: {value.strip()}")
+        if preference_lines:
+            lines.append("Предпочтения:\n" + "\n".join(preference_lines))
         if self.core_facts:
             lines.append("Ключевые факты: " + "; ".join(self.core_facts))
         return "\n".join(lines)

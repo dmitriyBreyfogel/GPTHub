@@ -27,9 +27,15 @@ class SearchStrategy:
             request.text,
             request.context_messages,
             request.model_override,
+            request.memory_context,
         )
         results = await self._search(request.text, search_query)
-        messages = self._build_messages(request.text, search_query, results)
+        messages = self._build_messages(
+            request.text,
+            search_query,
+            results,
+            request.memory_context.profile_prompt_text() if request.memory_context else "",
+        )
         response = await mws_client.chat(
             messages,
             model=request.model_override,
@@ -48,9 +54,15 @@ class SearchStrategy:
             request.text,
             request.context_messages,
             request.model_override,
+            request.memory_context,
         )
         results = await self._search(request.text, search_query)
-        messages = self._build_messages(request.text, search_query, results)
+        messages = self._build_messages(
+            request.text,
+            search_query,
+            results,
+            request.memory_context.profile_prompt_text() if request.memory_context else "",
+        )
         async for chunk in mws_client.chat_stream(
             messages,
             model=request.model_override,
@@ -145,6 +157,7 @@ class SearchStrategy:
         original_query: str,
         search_query: str,
         results: list[SearchResult],
+        profile_text: str,
     ) -> list[ChatMessage]:
         search_context = self._search_context_payload(
             original_query=original_query,
@@ -155,7 +168,7 @@ class SearchStrategy:
         return [
             ChatMessage(
                 role="system",
-                content=prompt_cache_manager.build_search_system_prompt(),
+                content=prompt_cache_manager.build_search_system_prompt(profile_text=profile_text),
             ),
             ChatMessage(
                 role="user",

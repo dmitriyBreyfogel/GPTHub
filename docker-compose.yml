@@ -177,6 +177,8 @@ services:
       SHOW_CHANGELOG: "false"
       ENABLE_COMMUNITY_SHARING: "false"
       ENABLE_MESSAGE_RATING: "true"
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      FORWARD_USER_INFO_HEADER_USER_ID: X-User-Id
       DEFAULT_LOCALE: ru-RU
       AUDIO_STT_ENGINE: openai
       AUDIO_STT_OPENAI_API_BASE_URL: http://backend:8000/v1

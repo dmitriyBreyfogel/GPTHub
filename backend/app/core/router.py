@@ -123,6 +123,7 @@ class ModelRouter:
             generation_options=request.generation_options,
             workspace_id=request.workspace_id,
             workspace_instructions=request.workspace_instructions,
+            memory_context=request.memory_context,
         )
         response = await decision.strategy.execute(routed_request)
         return self.enrich_response(decision, response)

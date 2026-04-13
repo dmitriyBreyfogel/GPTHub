@@ -25,6 +25,13 @@ class PromptCacheManager:
                 workspace_instructions,
             ),
             self._cached_section("profile", "Профиль пользователя", profile_text),
+            self._static_prompt(
+                "text:profile-guidance:v1",
+                [
+                    "Если вопрос относится к самому пользователю, сначала опирайся на профиль пользователя, если в текущем запросе нет явного исправления этих данных.",
+                    "Если пользователь в текущем сообщении исправляет своё имя, роль или предпочтения, считай это более свежим источником истины, чем профиль.",
+                ],
+            ),
             self._section("Релевантные воспоминания (используй только если они помогают текущему запросу)", memory_text),
         )
 
@@ -108,7 +115,7 @@ class PromptCacheManager:
             ),
         )
 
-    def build_search_system_prompt(self, *, workspace_instructions: str = "") -> str:
+    def build_search_system_prompt(self, *, profile_text: str = "", workspace_instructions: str = "") -> str:
         return self._join(
             self._static_prompt(
                 "search:v3",
@@ -137,6 +144,11 @@ class PromptCacheManager:
                     "- Для каждого важного утверждения указывай источник в формате [1], [2].",
                     "- В конце добавляй раздел 'Источники:' со списком использованных URL.",
                 ],
+            ),
+            self._cached_section(
+                "search_profile",
+                "Профиль пользователя (используй только для стиля ответа и разрешения неоднозначности, а не как источник фактов)",
+                profile_text,
             ),
             self._cached_section(
                 "workspace",
@@ -183,7 +195,7 @@ class PromptCacheManager:
             ),
         )
 
-    def build_research_plan_system_prompt(self, *, workspace_instructions: str = "") -> str:
+    def build_research_plan_system_prompt(self, *, profile_text: str = "", workspace_instructions: str = "") -> str:
         return self._join(
             self._static_prompt(
                 "research_plan:v2",
@@ -213,13 +225,18 @@ class PromptCacheManager:
                 ],
             ),
             self._cached_section(
+                "research_plan_profile",
+                "Профиль пользователя (используй только для разрешения неоднозначности поисковых запросов)",
+                profile_text,
+            ),
+            self._cached_section(
                 "workspace",
                 "Инструкции рабочего пространства (применяй, если они не конфликтуют с системными правилами выше)",
                 workspace_instructions,
             ),
         )
 
-    def build_research_synthesis_system_prompt(self, *, workspace_instructions: str = "") -> str:
+    def build_research_synthesis_system_prompt(self, *, profile_text: str = "", workspace_instructions: str = "") -> str:
         return self._join(
             self._static_prompt(
                 "research_synthesis:v3",
@@ -249,6 +266,11 @@ class PromptCacheManager:
                     "- В конце добавь раздел 'Источники:' со списком использованных URL.",
                     "- Если ответ получается слишком длинным, сократи второстепенные детали, но сохрани выводы, основания и ограничения.",
                 ],
+            ),
+            self._cached_section(
+                "research_synthesis_profile",
+                "Профиль пользователя (используй только для стиля ответа и языка, а не как источник фактов)",
+                profile_text,
             ),
             self._cached_section(
                 "workspace",

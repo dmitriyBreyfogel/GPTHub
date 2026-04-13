@@ -4,6 +4,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 
@@ -133,6 +134,30 @@ def _decision(
 
 
 class ChatCompletionsFlowTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.memory_context_patcher = patch.object(
+            chat_module,
+            "build_memory_context",
+            new=AsyncMock(return_value=SimpleNamespace(is_enabled=False, profile=None, long_term_facts=())),
+        )
+        self.persist_memory_patcher = patch.object(
+            chat_module,
+            "persist_memory",
+            new=AsyncMock(),
+        )
+        self.schedule_memory_patcher = patch(
+            "app.api.v1.chat_support.streams.schedule_memory_persist",
+            new=lambda **kwargs: None,
+        )
+        self.memory_context_patcher.start()
+        self.persist_memory_patcher.start()
+        self.schedule_memory_patcher.start()
+
+    def tearDown(self) -> None:
+        self.schedule_memory_patcher.stop()
+        self.persist_memory_patcher.stop()
+        self.memory_context_patcher.stop()
+
     def test_auto_request_builds_strategy_request_from_router_decision(self) -> None:
         strategy = _FakeStrategy(TaskType.SEARCH)
         fake_router = _FakeRouter(

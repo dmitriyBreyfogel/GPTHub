@@ -16,9 +16,11 @@ class MemoryFact:
 @runtime_checkable
 class IMemoryClient(Protocol):
     async def add(self, messages: list[dict], user_id: str) -> None: ...
+    async def add_facts(self, facts: list[str], user_id: str) -> None: ...
     async def search(self, query: str, user_id: str, limit: int = 5) -> list[MemoryFact]: ...
     async def get_all(self, user_id: str) -> list[MemoryFact]: ...
     async def delete(self, memory_id: str, user_id: str) -> None: ...
+    async def delete_all(self, user_id: str) -> None: ...
 
 
 class MemoryUnavailableError(RuntimeError):
@@ -55,6 +57,10 @@ class Mem0Client:
         import asyncio
         await asyncio.to_thread(self._memory.add, messages, user_id=user_id)
 
+    async def add_facts(self, facts: list[str], user_id: str) -> None:
+        import asyncio
+        await asyncio.to_thread(self._add_facts_sync, facts, user_id)
+
     async def search(self, query: str, user_id: str, limit: int = 5) -> list[MemoryFact]:
         import asyncio
         results = await asyncio.to_thread(self._memory.search, query, user_id=user_id, limit=limit)
@@ -68,6 +74,26 @@ class Mem0Client:
     async def delete(self, memory_id: str, user_id: str) -> None:
         import asyncio
         await asyncio.to_thread(self._memory.delete, memory_id)
+
+    async def delete_all(self, user_id: str) -> None:
+        facts = await self.get_all(user_id=user_id)
+        for fact in facts:
+            await self.delete(memory_id=fact.id, user_id=user_id)
+
+    def _add_facts_sync(self, facts: list[str], user_id: str) -> None:
+        for fact in facts:
+            normalized = " ".join((fact or "").split()).strip()
+            if not normalized:
+                continue
+            try:
+                self._memory.add(normalized, user_id=user_id)
+                continue
+            except Exception:
+                pass
+            self._memory.add(
+                [{"role": "assistant", "content": normalized}],
+                user_id=user_id,
+            )
 
 
 assert isinstance(Mem0Client.__new__(Mem0Client), IMemoryClient)
