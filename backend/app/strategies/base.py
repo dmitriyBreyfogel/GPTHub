@@ -6,6 +6,7 @@ from typing import AsyncIterator, Protocol, runtime_checkable
 
 
 class TaskType(StrEnum):
+    RUNTIME = "runtime"
     TEXT = "text"
     IMAGE_ANALYSIS = "image_analysis"
     AUDIO = "audio"

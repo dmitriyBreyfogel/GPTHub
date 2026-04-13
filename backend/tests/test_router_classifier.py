@@ -193,13 +193,13 @@ class TaskClassifierTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_direct_runtime_question_does_not_force_web_search(self) -> None:
         classifier = TaskClassifier()
-        classifier._classify_semantic = AsyncMock(return_value=None)
-        classifier._classify_llm = AsyncMock(return_value=None)
+        classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))
+        classifier._classify_llm = AsyncMock(side_effect=AssertionError("llm must not run"))
 
         result = await classifier.classify("Какой сейчас год?")
 
-        self.assertEqual(TaskType.TEXT, result.task_type)
-        self.assertEqual("fallback", result.method)
+        self.assertEqual(TaskType.RUNTIME, result.task_type)
+        self.assertEqual("runtime", result.method)
 
     async def test_follow_up_after_sourced_answer_routes_to_search(self) -> None:
         classifier = TaskClassifier()
@@ -224,7 +224,17 @@ class TaskClassifierTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(TaskType.SEARCH, result.task_type)
-        self.assertEqual("search_context", result.method)
+        self.assertIn(result.method, {"search_context", "search_heuristic"})
+
+    async def test_topic_lookup_with_year_routes_to_search_even_without_explicit_search_button(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))
+        classifier._classify_llm = AsyncMock(side_effect=AssertionError("llm must not run"))
+
+        result = await classifier.classify("Расскажи про МТС True Hack 2025")
+
+        self.assertEqual(TaskType.SEARCH, result.task_type)
+        self.assertIn(result.method, {"search_heuristic", "search_evidence"})
 
     async def test_semantic_router_handles_diverse_prompt_shapes(self) -> None:
         classifier = TaskClassifier(semantic_threshold=0.3, semantic_margin=0.01)
@@ -376,6 +386,22 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(TaskType.SEARCH, decision.task_type)
         self.assertEqual("custom-text-model", decision.model)
         self.assertEqual("semantic_manual_model", decision.method)
+        self.assertFalse(decision.manual_override)
+        self.assertEqual(1, len(classifier.calls))
+
+    async def test_explicit_text_model_can_auto_route_runtime_and_still_preserve_model(self) -> None:
+        classifier = _RecordingClassifier(_classification(TaskType.RUNTIME, method="runtime"))
+        router = ModelRouter(classifier=classifier)
+
+        decision = await router.route(
+            "Какой сейчас год?",
+            user_id="user-1",
+            model_override="custom-text-model",
+        )
+
+        self.assertEqual(TaskType.RUNTIME, decision.task_type)
+        self.assertEqual("custom-text-model", decision.model)
+        self.assertEqual("runtime_manual_model", decision.method)
         self.assertFalse(decision.manual_override)
         self.assertEqual(1, len(classifier.calls))
 

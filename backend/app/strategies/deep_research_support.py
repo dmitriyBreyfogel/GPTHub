@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass
 from typing import TypedDict
@@ -54,22 +55,27 @@ def fallback_plan_step(query: str) -> str:
 
 
 def build_source_context(ranked_documents: list[RankedDocument], context_limit: int) -> str:
-    parts = []
+    if not ranked_documents:
+        return NO_SOURCES_MESSAGE
+
     budget = context_limit
+    payload = []
     for index, document in enumerate(ranked_documents, start=1):
         text = trim_text(
             document.text,
             max(1000, budget // max(1, len(ranked_documents))),
         )
-        part = (
-            f"[{index}] {document.title}\n"
-            f"URL: {document.url}\n"
-            f"Score: {document.score:.4f}\n"
-            f"Snippet: {document.snippet}\n"
-            f"Text:\n{text}"
+        payload.append(
+            {
+                "id": index,
+                "title": document.title,
+                "url": document.url,
+                "score": round(document.score, 4),
+                "snippet": document.snippet,
+                "text": text,
+            }
         )
-        parts.append(part)
-    return "\n\n".join(parts) or NO_SOURCES_MESSAGE
+    return json.dumps({"sources": payload}, ensure_ascii=False, indent=2)
 
 
 def clean_string_list(value: object, fallback: list[str], limit: int) -> list[str]:

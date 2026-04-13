@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from app.core.file_types import infer_mime_from_filename, task_type_from_mime
 from app.core.prompt_cache import prompt_cache_manager
+import app.core.query_signals as query_signals
 from app.core.task_types import TaskType
 from app.providers.mws_gpt import ChatMessage, mws_client
 
@@ -17,7 +18,7 @@ YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 DEFAULT_AUTO_TASK_TYPES = tuple(
     task_type
     for task_type in TaskType
-    if task_type != TaskType.DEEP_RESEARCH
+    if task_type not in {TaskType.DEEP_RESEARCH, TaskType.RUNTIME}
 )
 
 SEARCH_WEB_MARKERS = (
@@ -311,10 +312,10 @@ def _classify_by_search_need(
     if not normalized or URL_PATTERN.search(normalized):
         return None
 
-    if _looks_like_runtime_question(normalized):
+    if query_signals.looks_like_runtime_question(text):
         return None
 
-    if _contains_any(normalized, SEARCH_WEB_MARKERS):
+    if query_signals.has_explicit_search_markers(text):
         return TaskClassification(
             task_type=TaskType.SEARCH,
             routing_reason="Запрос похож на поиск актуальной или внешней информации в интернете.",
@@ -322,7 +323,7 @@ def _classify_by_search_need(
             method="search_heuristic",
         )
 
-    if YEAR_PATTERN.search(normalized) and _contains_any(normalized, FACT_REQUEST_MARKERS):
+    if YEAR_PATTERN.search(normalized) and query_signals.looks_like_information_request(text):
         return TaskClassification(
             task_type=TaskType.SEARCH,
             routing_reason="В запросе есть год и запрос на факты или отчет, поэтому включен веб-поиск.",
@@ -330,12 +331,14 @@ def _classify_by_search_need(
             method="search_heuristic",
         )
 
-    last_sourced_assistant = _last_sourced_assistant_message(context_messages)
-    if last_sourced_assistant and _looks_like_information_request(normalized) and not _looks_like_transform_request(normalized):
-        previous_user = _previous_user_text(context_messages, text)
-        assistant_text = _message_content_to_text(last_sourced_assistant.get("content"))
-        context_seed = f"{previous_user}\n{assistant_text}"
-        if YEAR_PATTERN.search(context_seed) or _contains_any(context_seed, SEARCH_WEB_MARKERS):
+    topic_state = query_signals.build_topic_state(context_messages, current_text=text)
+    if (
+        topic_state.has_sourced_context
+        and query_signals.looks_like_information_request(text)
+        and not query_signals.looks_like_transform_request(text)
+    ):
+        context_seed = f"{topic_state.previous_user_text}\n{topic_state.last_sourced_assistant_text}"
+        if YEAR_PATTERN.search(context_seed) or query_signals.has_explicit_search_markers(context_seed):
             return TaskClassification(
                 task_type=TaskType.SEARCH,
                 routing_reason="Похоже на follow-up вопрос по предыдущему ответу с источниками, продолжаю веб-поиск по теме.",
@@ -343,7 +346,26 @@ def _classify_by_search_need(
                 method="search_context",
             )
 
+    if query_signals.requires_external_evidence(text, context_messages):
+        return TaskClassification(
+            task_type=TaskType.SEARCH,
+            routing_reason="Evidence required: the request should be grounded in external sources instead of model-only generation.",
+            confidence=0.86,
+            method="search_evidence",
+        )
+
     return None
+
+
+def _classify_runtime_question(text: str) -> TaskClassification | None:
+    if not query_signals.looks_like_runtime_question(text):
+        return None
+    return TaskClassification(
+        task_type=TaskType.RUNTIME,
+        routing_reason="Runtime question: the answer should come from the current server date or time, not from model memory.",
+        confidence=1.0,
+        method="runtime",
+    )
 
 
 class TaskClassifier:
@@ -371,6 +393,10 @@ class TaskClassifier:
         if mime_result:
             return mime_result
 
+        runtime_result = _classify_runtime_question(text)
+        if runtime_result:
+            return runtime_result
+
         text_shape_result = _classify_by_text_shape(text)
         if text_shape_result:
             return text_shape_result
@@ -379,6 +405,22 @@ class TaskClassifier:
         if search_need_result:
             return search_need_result
 
+        if query_signals.requires_external_evidence(text, context_messages):
+            llm = await self._classify_llm(
+                text,
+                mime=mime,
+                file_name=file_name,
+                context_messages=context_messages,
+            )
+            if llm and llm.task_type in {TaskType.SEARCH, TaskType.WEB_PARSE}:
+                return llm
+            return TaskClassification(
+                task_type=TaskType.SEARCH,
+                routing_reason="Evidence guard: the query requires external grounding, so text-only generation was blocked.",
+                confidence=0.8,
+                method="evidence_guard",
+            )
+
         try:
             semantic = await self._classify_semantic(text)
         except Exception:
@@ -386,7 +428,12 @@ class TaskClassifier:
         if semantic:
             return semantic
 
-        llm = await self._classify_llm(text, mime=mime, file_name=file_name)
+        llm = await self._classify_llm(
+            text,
+            mime=mime,
+            file_name=file_name,
+            context_messages=context_messages,
+        )
         if llm:
             return llm
 
@@ -513,7 +560,14 @@ class TaskClassifier:
             )
         return None
 
-    async def _classify_llm(self, text: str, *, mime: str | None, file_name: str | None) -> TaskClassification | None:
+    async def _classify_llm(
+        self,
+        text: str,
+        *,
+        mime: str | None,
+        file_name: str | None,
+        context_messages: list[dict] | None = None,
+    ) -> TaskClassification | None:
         if not text or not text.strip():
             return None
 
@@ -530,11 +584,13 @@ class TaskClassifier:
         }
 
         system = prompt_cache_manager.build_classifier_system_prompt()
+        classifier_context = query_signals.build_classifier_context(text, context_messages)
         user = json.dumps(
             {
                 "text": text.strip(),
                 "file_content_type": mime,
                 "file_name": file_name,
+                "conversation_context": classifier_context,
                 "available_task_types": allowed,
                 "json_schema": schema,
             },

@@ -12,6 +12,7 @@ from app.strategies.deep_research import DeepResearchStrategy
 from app.strategies.file_qa import FileQAStrategy
 from app.strategies.image_gen import ImageGenStrategy
 from app.strategies.presentation import PresentationStrategy
+from app.strategies.runtime import RuntimeStrategy
 from app.strategies.search import SearchStrategy
 from app.strategies.text import TextStrategy
 from app.strategies.vision import VisionStrategy
@@ -189,7 +190,7 @@ class ModelRouter:
                 file_name=file_name,
                 context_messages=context_messages,
             )
-            if classification.task_type in {TaskType.SEARCH, TaskType.WEB_PARSE}:
+            if classification.task_type in {TaskType.RUNTIME, TaskType.SEARCH, TaskType.WEB_PARSE}:
                 return RoutingDecision(
                     task_type=classification.task_type,
                     model=model,
@@ -331,6 +332,7 @@ class ModelRouter:
 
     def _default_model_for_task(self, task_type: TaskType) -> str:
         model_by_task = {
+            TaskType.RUNTIME: settings.default_text_model,
             TaskType.TEXT: settings.default_text_model,
             TaskType.IMAGE_ANALYSIS: settings.vision_model,
             TaskType.AUDIO: settings.asr_model,
@@ -346,6 +348,7 @@ class ModelRouter:
 
 model_router = ModelRouter(
     strategies=[
+        RuntimeStrategy(),
         TextStrategy(),
         SearchStrategy(),
         WebParseStrategy(),

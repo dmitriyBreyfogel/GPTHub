@@ -306,10 +306,11 @@ class DeepResearchStrategy:
                     f"{resolved_query}\n\n"
                     "Research plan:\n"
                     f"{plan_context}\n\n"
-                    "Collected sources:\n"
+                    "Collected sources JSON:\n"
                     f"{source_context}\n\n"
                     "Write a detailed answer grounded only in the collected sources. "
                     "Prefer official sources when available. "
+                    "Cite sources only by their numeric ids. "
                     "Call out missing data, weak evidence, and contradictions explicitly."
                 ),
             ),

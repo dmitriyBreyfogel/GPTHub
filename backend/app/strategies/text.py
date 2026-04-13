@@ -73,7 +73,12 @@ class TextStrategy:
             f"- Current year: {current_dt.year}\n"
             "Используй эти значения для вопросов про сейчас, сегодня, текущую дату, время и год."
         )
-        return f"{base_prompt}\n\n{runtime_context}"
+        evidence_guard = (
+            "If the user asks for current or external factual information that is not present in the provided context, "
+            "do not guess, do not rely on stale training knowledge, and do not fabricate certainty. "
+            "State that web search or external sources are required."
+        )
+        return f"{base_prompt}\n\n{runtime_context}\n\n{evidence_guard}"
 
     async def _profile_text(self, user_id: str) -> str:
         try:
