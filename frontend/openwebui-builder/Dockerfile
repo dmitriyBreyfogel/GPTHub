@@ -18,7 +18,22 @@ RUN git clone --depth 1 --branch "${OPENWEBUI_GIT_REF}" "${OPENWEBUI_GIT_REPO}" 
 
 WORKDIR /src/openwebui
 
-RUN npm ci --force
+RUN npm config set fetch-retries 5 \
+	&& npm config set fetch-retry-factor 2 \
+	&& npm config set fetch-retry-mintimeout 20000 \
+	&& npm config set fetch-retry-maxtimeout 120000 \
+	&& npm config set fetch-timeout 600000 \
+	&& npm config set audit false \
+	&& npm config set fund false \
+	&& retry=0 \
+	&& until [ "$retry" -ge 3 ]; do \
+		npm ci --force && break; \
+		retry=$((retry + 1)); \
+		echo "npm ci failed, retry ${retry}/3"; \
+		npm cache clean --force; \
+		sleep $((retry * 10)); \
+	done \
+	&& [ "$retry" -lt 3 ]
 
 ENV APP_BUILD_HASH=${OPENWEBUI_GIT_REF}
 ENV VITE_GPTHUB_VISION_MODELS=${VITE_GPTHUB_VISION_MODELS}
