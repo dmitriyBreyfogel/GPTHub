@@ -43,6 +43,34 @@ class _FakeImageClient:
         return self.urls_by_model[model or settings.image_generation_model]
 
 
+class _FakePresentationClient:
+    def __init__(self, response: dict) -> None:
+        self.response = response
+        self.chat_calls: list[dict] = []
+        self.image_calls: list[dict] = []
+
+    async def chat(
+        self,
+        messages,
+        model: str | None = None,
+        temperature: float = 0.7,
+        generation_options: dict | None = None,
+    ):
+        self.chat_calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "generation_options": generation_options,
+            }
+        )
+        return type("ChatResponse", (), {"content": json.dumps(self.response, ensure_ascii=False)})()
+
+    async def generate_image(self, prompt: str, model: str | None = None) -> str:
+        self.image_calls.append({"prompt": prompt, "model": model})
+        return "https://cdn.example/presentation.png"
+
+
 class _FakeFileStorage:
     def __init__(self) -> None:
         self.upload_calls: list[dict] = []
@@ -174,9 +202,22 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
     def test_presentation_prompt_requests_visual_slide_contract(self) -> None:
         prompt = prompt_cache_manager.build_presentation_system_prompt()
 
-        for marker in ('"takeaway"', '"visual_hint"', '"layout"', "comparison", "timeline", "metrics"):
+        for marker in (
+            '"takeaway"',
+            '"visual_hint"',
+            '"layout"',
+            '"body"',
+            '"image_prompt"',
+            "comparison",
+            "timeline",
+            "metrics",
+            "statement",
+            "image_text",
+            "process",
+        ):
             self.assertIn(marker, prompt)
         self.assertIn("6-10", prompt)
+        self.assertIn("1-2", prompt)
 
     async def test_execute_returns_markdown_download_link(self) -> None:
         strategy = PresentationStrategy()
@@ -222,16 +263,68 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
                         "visual_hint": "Схема из четырех связанных блоков",
                         "layout": "two_column",
                         "speaker_notes": "Пояснить, где принимается решение о task type.",
+                    },
+                    {
+                        "title": "Сценарий в действии",
+                        "layout": "image_text",
+                        "body": "Пользователь видит единый поток вместо набора разрозненных инструментов.",
+                        "bullets": ["Единый чат", "Автоматический выбор", "Понятный результат"],
+                        "left_title": "До",
+                        "right_title": "После",
+                        "left_items": ["Ручной выбор сервиса", "Потеря контекста"],
+                        "right_items": ["Автоматическая маршрутизация", "Сохранение памяти"],
+                        "metrics": [{"value": "1", "label": "единый интерфейс"}],
+                        "image_prompt": "Сотрудник работает в едином корпоративном AI-чате",
                     }
                 ]
             }
         )
 
-        self.assertEqual(1, len(slides))
+        self.assertEqual(2, len(slides))
         self.assertEqual("title", slides[0].layout)
         self.assertEqual("Поток запроса от UI до модели", slides[0].subtitle)
         self.assertEqual("Маршрутизация отделяет UX от выбора модели.", slides[0].takeaway)
         self.assertEqual("Схема из четырех связанных блоков", slides[0].visual_hint)
+        self.assertEqual("image_text", slides[1].layout)
+        self.assertEqual("Пользователь видит единый поток вместо набора разрозненных инструментов.", slides[1].body)
+        self.assertEqual(["Ручной выбор сервиса", "Потеря контекста"], slides[1].left_items)
+        self.assertEqual(["Автоматическая маршрутизация", "Сохранение памяти"], slides[1].right_items)
+        self.assertEqual(["1 - единый интерфейс"], slides[1].metrics)
+        self.assertEqual("Сотрудник работает в едином корпоративном AI-чате", slides[1].image_prompt)
+
+    async def test_generate_slide_specs_enriches_image_slide_when_prompt_present(self) -> None:
+        strategy = PresentationStrategy()
+        fake_client = _FakePresentationClient(
+            {
+                "slides": [
+                    {
+                        "title": "GPTHub",
+                        "subtitle": "Единая точка входа",
+                        "bullets": ["Автоматическая маршрутизация"],
+                    },
+                    {
+                        "title": "Рабочий сценарий",
+                        "layout": "image_text",
+                        "body": "Сотрудник задает вопрос и получает готовый результат в одном окне.",
+                        "image_prompt": "Корпоративный сотрудник работает с AI-ассистентом в чате",
+                    },
+                ]
+            }
+        )
+
+        with (
+            patch("app.strategies.presentation.mws_client", fake_client),
+            patch.object(strategy, "_fetch_image_bytes", new=AsyncMock(return_value=b"image-bytes")),
+        ):
+            slides = await strategy._generate_slide_specs(
+                _strategy_request(task_type=TaskType.PRESENTATION, text="Сделай презентацию про GPTHub")
+            )
+
+        self.assertEqual(2, len(slides))
+        self.assertEqual("https://cdn.example/presentation.png", slides[1].image_url)
+        self.assertEqual(b"image-bytes", slides[1].image_bytes)
+        self.assertEqual(settings.image_generation_model, fake_client.image_calls[0]["model"])
+        self.assertIn("no text", fake_client.image_calls[0]["prompt"])
 
     def test_build_pptx_uses_designed_widescreen_layout(self) -> None:
         strategy = PresentationStrategy()
@@ -251,17 +344,33 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
                     bullets=["Классификация запроса", "Выбор стратегии", "Возврат результата"],
                     takeaway="Каждый шаг явно отделен и тестируем.",
                     visual_hint="Карточки по этапам",
-                    layout="content",
+                    layout="process",
+                ),
+                SlideSpec(
+                    title="Пользовательский эффект",
+                    bullets=[],
+                    body="Пользователь получает результат в одном окне, а система сама подбирает нужную стратегию и модель.",
+                    takeaway="Один сценарий заменяет ручное переключение между инструментами.",
+                    layout="text",
+                ),
+                SlideSpec(
+                    title="Визуальный пример",
+                    bullets=["Единый чат", "Автоматический выбор"],
+                    body="Иллюстрация помогает показать идею без дополнительного текста.",
+                    image_prompt="Единый корпоративный чат с AI-ассистентом",
+                    layout="image_text",
                 ),
             ]
         )
 
         deck = Presentation(BytesIO(deck_bytes))
 
-        self.assertEqual(2, len(deck.slides))
+        self.assertEqual(4, len(deck.slides))
         self.assertGreater(deck.slide_width, deck.slide_height)
         self.assertGreater(len(deck.slides[0].shapes), 8)
         self.assertGreater(len(deck.slides[1].shapes), 12)
+        self.assertGreater(len(deck.slides[2].shapes), 6)
+        self.assertGreater(len(deck.slides[3].shapes), 6)
 
 
 class ResponseMetadataTests(unittest.TestCase):
