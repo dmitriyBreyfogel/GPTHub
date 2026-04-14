@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import AsyncIterator
 
 from app.core.prompt_cache import prompt_cache_manager
+from app.core.response_formatting import append_technical_formatting_guidance
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
@@ -62,6 +63,7 @@ class TextStrategy:
             memory_text=memory_text,
             workspace_instructions=request.workspace_instructions,
         )
+        base_prompt = append_technical_formatting_guidance(base_prompt)
         current_dt = datetime.now().astimezone()
         runtime_context = (
             "Текущие дата и время сервера:\n"

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 from typing import AsyncIterator
 
 from app.core.config import settings
 from app.providers.mws_gpt import mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
+from app.strategies.response_utils import stream_chunk
 from app.strategies.text import TextStrategy
+
+
+AUDIO_STREAM_HEARTBEAT_SECONDS = 25.0
+AUDIO_STREAM_CHUNK_SIZE = 120
 
 
 class AudioStrategy:
@@ -26,10 +32,50 @@ class AudioStrategy:
         )
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
-        transcript = await self._transcribe(request)
-        text_request = self._text_request(request, transcript)
-        async for chunk in self._text_strategy.stream(text_request):
-            yield chunk
+        transcript_task = asyncio.create_task(self._transcribe(request))
+        try:
+            yield self._heartbeat_chunk(request)
+            while True:
+                try:
+                    transcript = await asyncio.wait_for(
+                        asyncio.shield(transcript_task),
+                        timeout=AUDIO_STREAM_HEARTBEAT_SECONDS,
+                    )
+                    break
+                except asyncio.TimeoutError:
+                    yield self._heartbeat_chunk(request)
+
+            text_request = self._text_request(request, transcript)
+            emitted_text_chunk = False
+            try:
+                async for chunk in self._text_strategy.stream(text_request):
+                    emitted_text_chunk = True
+                    yield chunk
+            except Exception:
+                if emitted_text_chunk:
+                    raise
+                response = await self._text_strategy.execute(text_request)
+                audio_response = StrategyResponse(
+                    content=response.content,
+                    model_used=response.model_used,
+                    task_type=self.task_type,
+                    routing_reason=(
+                        "Audio strategy: text streaming fallback after audio transcription."
+                    ),
+                )
+                for start in range(0, len(audio_response.content), AUDIO_STREAM_CHUNK_SIZE):
+                    yield stream_chunk(
+                        audio_response,
+                        audio_response.content[start : start + AUDIO_STREAM_CHUNK_SIZE],
+                        finish_reason=None,
+                        include_gpthub=start == 0,
+                    )
+                yield stream_chunk(audio_response, "", finish_reason="stop", include_gpthub=True)
+                yield b"data: [DONE]\n\n"
+        except Exception:
+            if not transcript_task.done():
+                transcript_task.cancel()
+            raise
 
     async def _transcribe(self, request: StrategyRequest) -> str:
         if not request.file_bytes:
@@ -39,6 +85,17 @@ class AudioStrategy:
             filename=request.file_name or "audio.wav",
             content_type=request.file_content_type or "audio/wav",
             model=settings.asr_model,
+        )
+
+    def _heartbeat_chunk(self, request: StrategyRequest) -> bytes:
+        return stream_chunk(
+            StrategyResponse(
+                content="",
+                model_used=request.model_override or settings.asr_model,
+                task_type=self.task_type,
+            ),
+            "",
+            finish_reason=None,
         )
 
     def _text_request(self, request: StrategyRequest, transcript: str) -> StrategyRequest:

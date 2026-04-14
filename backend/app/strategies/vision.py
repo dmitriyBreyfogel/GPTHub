@@ -7,6 +7,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.prompt_cache import prompt_cache_manager
+from app.core.response_formatting import append_technical_formatting_guidance
 from app.providers.mws_gpt import ChatMessage, ChatResponse, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
@@ -84,7 +85,9 @@ class VisionStrategy:
         messages = [
             ChatMessage(
                 role="system",
-                content=prompt_cache_manager.build_vision_system_prompt(),
+                content=append_technical_formatting_guidance(
+                    prompt_cache_manager.build_vision_system_prompt()
+                ),
             )
         ]
         context_messages = request.context_messages or []

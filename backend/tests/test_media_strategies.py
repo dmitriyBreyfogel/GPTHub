@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from io import BytesIO
@@ -21,6 +22,7 @@ from app.core.config import settings
 from app.core.prompt_cache import prompt_cache_manager
 from app.storage.files import StoredFile
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
+from app.strategies.audio import AudioStrategy
 from app.strategies.image_gen import ImageGenStrategy
 from app.strategies.presentation import PresentationStrategy, SlideSpec
 from app.strategies.response_utils import stream_chunk
@@ -117,6 +119,43 @@ def _strategy_request(
         user_id="anonymous",
         model_override=model_override,
     )
+
+
+class AudioStrategyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stream_emits_heartbeat_without_restarting_audio_processing(self) -> None:
+        strategy = AudioStrategy()
+        request = StrategyRequest(
+            task_type=TaskType.AUDIO,
+            text="summarize",
+            user_id="user-1",
+            model_override="asr-model",
+            file_bytes=b"audio-bytes",
+            file_name="song.mp3",
+            file_content_type="audio/mpeg",
+        )
+
+        async def slow_transcribe(_request):
+            await asyncio.sleep(0.01)
+            return "audio transcript"
+
+        async def stream_text(_request):
+            yield b"data: audio answer\n\n"
+            yield b"data: [DONE]\n\n"
+
+        transcribe = AsyncMock(side_effect=slow_transcribe)
+
+        with (
+            patch.object(strategy, "_transcribe", transcribe),
+            patch.object(strategy._text_strategy, "stream", stream_text),
+            patch("app.strategies.audio.AUDIO_STREAM_HEARTBEAT_SECONDS", 0.001),
+        ):
+            chunks = [chunk async for chunk in strategy.stream(request)]
+
+        transcribe.assert_awaited_once_with(request)
+        first_payload = json.loads(chunks[0].decode("utf-8").removeprefix("data: "))
+        self.assertEqual({}, first_payload["choices"][0]["delta"])
+        self.assertIn("audio answer", b"".join(chunks).decode("utf-8"))
+        self.assertEqual(b"data: [DONE]\n\n", chunks[-1])
 
 
 class ImageGenerationStrategyTests(unittest.IsolatedAsyncioTestCase):
