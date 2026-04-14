@@ -15,7 +15,7 @@ from pptx.util import Inches, Pt
 from app.core.config import settings
 from app.core.prompt_cache import prompt_cache_manager
 from app.providers.mws_gpt import ChatMessage, mws_client
-from app.storage.files import file_storage
+from app.storage.files import build_file_access_token, file_storage
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 from app.strategies.response_utils import extract_json_object, stream_chunk
 
@@ -101,7 +101,7 @@ class PresentationStrategy:
             content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             user_id=request.user_id,
         )
-        file_url = f"/v1/files/{stored.file_id}"
+        file_url = f"/v1/files/{stored.file_id}?access_token={build_file_access_token(stored.file_id)}"
         image_count = sum(1 for slide in slides if slide.image_bytes or slide.image_url)
         content = (
             "Презентация готова.\n"

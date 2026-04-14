@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from app.api.v1.chat_support.parsing import content_to_text
+from app.core.prompt_cache import prompt_cache_manager
 from app.core.query_signals import build_topic_state
 from app.memory.context import MemoryContext
 from app.providers.mws_gpt import ChatMessage, mws_client
@@ -226,13 +227,7 @@ async def resolve_search_query(
     messages = [
         ChatMessage(
             role="system",
-            content=(
-                "Rewrite the latest user request into a standalone web-search query. "
-                "Preserve the exact event, company, year, location, and topic from the conversation context. "
-                "If the topic state contains a canonical event, company, or product name, keep that name in the query. "
-                "If user profile memory provides missing stable context such as location or persistent preference, use it only to resolve ambiguity. "
-                "Do not answer the question. Return only the rewritten query in the user's language."
-            ),
+            content=prompt_cache_manager.build_query_rewrite_system_prompt(),
         ),
         ChatMessage(
             role="user",

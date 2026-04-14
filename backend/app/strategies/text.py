@@ -58,11 +58,18 @@ class TextStrategy:
         memory_context = request.memory_context
         profile_text = memory_context.profile_prompt_text() if memory_context else ""
         memory_text = memory_context.long_term_prompt_text() if memory_context else ""
-        base_prompt = prompt_cache_manager.build_text_system_prompt(
-            profile_text=profile_text,
-            memory_text=memory_text,
-            workspace_instructions=request.workspace_instructions,
-        )
+        if request.task_type == TaskType.AUDIO:
+            base_prompt = prompt_cache_manager.build_audio_system_prompt(
+                profile_text=profile_text,
+                memory_text=memory_text,
+                workspace_instructions=request.workspace_instructions,
+            )
+        else:
+            base_prompt = prompt_cache_manager.build_text_system_prompt(
+                profile_text=profile_text,
+                memory_text=memory_text,
+                workspace_instructions=request.workspace_instructions,
+            )
         base_prompt = append_technical_formatting_guidance(base_prompt)
         current_dt = datetime.now().astimezone()
         runtime_context = (

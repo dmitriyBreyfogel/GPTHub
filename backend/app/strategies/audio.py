@@ -31,7 +31,10 @@ class AudioStrategy:
             content=response.content,
             model_used=response.model_used,
             task_type=self.task_type,
-            routing_reason=f"Audio strategy: audio was transcribed with {transcription_model}, then forwarded to TextStrategy.",
+            routing_reason=(
+                f"Audio strategy: audio was transcribed with {transcription_model}, "
+                "then forwarded to TextStrategy."
+            ),
         )
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
@@ -112,12 +115,18 @@ class AudioStrategy:
         )
 
     def _text_request(self, request: StrategyRequest, transcript: str) -> StrategyRequest:
-        if request.text.strip():
-            text = f"{request.text.strip()}\n\nAudio transcript:\n{transcript}"
-        else:
-            text = f"Analyze the attached audio.\n\nAudio transcript:\n{transcript}"
+        prompt = (
+            request.text.strip()
+            or "Analyze the audio recording using the transcript and provide a complete, helpful answer."
+        )
+        text = (
+            "Mode: analyze the audio recording using the transcript.\n\n"
+            f"User request:\n{prompt}\n\n"
+            "Audio transcript:\n"
+            f"{transcript}"
+        )
         return StrategyRequest(
-            task_type=TaskType.TEXT,
+            task_type=TaskType.AUDIO,
             text=text,
             user_id=request.user_id,
             model_override=(request.routing_models or {}).get("text") or settings.default_text_model,
