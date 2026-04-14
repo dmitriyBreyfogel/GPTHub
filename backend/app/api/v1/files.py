@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Header, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 
 from app.core.file_types import normalize_content_type
-from app.storage.files import file_storage
+from app.storage.files import file_storage, verify_file_access_token
 
 router = APIRouter()
 
@@ -48,9 +48,16 @@ async def list_files(x_user_id: str = Header(...)):
 
 
 @router.get("/files/{file_id}")
-async def download_file(file_id: str, x_user_id: str = Header("anonymous")):
+async def download_file(
+    file_id: str,
+    access_token: str | None = Query(default=None),
+    x_user_id: str = Header("anonymous"),
+):
     try:
-        data, content_type = await file_storage.download(file_id=file_id, user_id=x_user_id)
+        if verify_file_access_token(file_id, access_token):
+            data, content_type = await file_storage.download_shared(file_id=file_id)
+        else:
+            data, content_type = await file_storage.download(file_id=file_id, user_id=x_user_id)
     except PermissionError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return Response(content=data, media_type=content_type)

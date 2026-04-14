@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import io
 import uuid
 from dataclasses import dataclass
@@ -46,8 +48,23 @@ class IFileStorage(Protocol):
     async def list_files(self, user_id: str) -> list[StoredFileInfo]: ...
 
     async def download(self, file_id: str, user_id: str) -> tuple[bytes, str]: ...
+    async def download_shared(self, file_id: str) -> tuple[bytes, str]: ...
 
     async def delete(self, file_id: str, user_id: str) -> None: ...
+
+
+def build_file_access_token(file_id: str) -> str:
+    return hmac.new(
+        _file_link_secret().encode("utf-8"),
+        file_id.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def verify_file_access_token(file_id: str, token: str | None) -> bool:
+    if not token:
+        return False
+    return hmac.compare_digest(build_file_access_token(file_id), token.strip())
 
 
 class MinIOFileStorage:
@@ -140,6 +157,15 @@ class MinIOFileStorage:
                 user_id=user_id,
             )
 
+        return await self._download_file_row(file_row)
+
+    async def download_shared(self, file_id: str) -> tuple[bytes, str]:
+        async with AsyncSessionLocal() as session:
+            file_row = await self._get_file_by_id(session, file_id=file_id)
+
+        return await self._download_file_row(file_row)
+
+    async def _download_file_row(self, file_row: File) -> tuple[bytes, str]:
         response = await self._client.get_object(self._bucket, file_row.object_key)
         data = await response.read()
         return data, file_row.content_type
@@ -177,6 +203,13 @@ class MinIOFileStorage:
             raise self._file_not_found(file_id, user_id)
         return file_row
 
+    async def _get_file_by_id(self, session: AsyncSession, *, file_id: str) -> File:
+        result = await session.execute(select(File).where(File.id == uuid.UUID(file_id)))
+        file_row = result.scalar_one_or_none()
+        if file_row is None:
+            raise PermissionError(f"File {file_id} not found")
+        return file_row
+
     async def _ensure_user_id(self, session: AsyncSession, external_id: str) -> uuid.UUID:
         stmt = (
             pg_insert(User)
@@ -194,6 +227,15 @@ class MinIOFileStorage:
     @staticmethod
     def _file_not_found(file_id: str, user_id: str) -> PermissionError:
         return PermissionError(f"File {file_id} not found for user {user_id}")
+
+
+def _file_link_secret() -> str:
+    return (
+        settings.file_link_secret
+        or settings.minio_secret_key
+        or settings.mws_gpt_api_key
+        or "gpthub-file-link-secret"
+    )
 
 
 file_storage: IFileStorage = MinIOFileStorage()

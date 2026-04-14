@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = ""
     minio_bucket: str = "gpthub"
+    file_link_secret: str = ""
 
     # Langfuse
     langfuse_secret_key: str = ""

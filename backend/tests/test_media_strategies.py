@@ -20,7 +20,7 @@ from pptx import Presentation
 from app.api.v1 import files as files_module
 from app.core.config import settings
 from app.core.prompt_cache import prompt_cache_manager
-from app.storage.files import StoredFile
+from app.storage.files import StoredFile, build_file_access_token
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 from app.strategies.audio import AudioStrategy
 from app.strategies.image_gen import ImageGenStrategy
@@ -77,6 +77,7 @@ class _FakeFileStorage:
     def __init__(self) -> None:
         self.upload_calls: list[dict] = []
         self.download_calls: list[dict] = []
+        self.shared_download_calls: list[dict] = []
 
     async def upload(
         self,
@@ -104,6 +105,10 @@ class _FakeFileStorage:
 
     async def download(self, *, file_id: str, user_id: str) -> tuple[bytes, str]:
         self.download_calls.append({"file_id": file_id, "user_id": user_id})
+        return b"pptx-bytes", "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+    async def download_shared(self, *, file_id: str) -> tuple[bytes, str]:
+        self.shared_download_calls.append({"file_id": file_id})
         return b"pptx-bytes", "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
 
@@ -286,9 +291,10 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
+        expected_url = f"/v1/files/presentation-file-id?access_token={build_file_access_token('presentation-file-id')}"
         self.assertEqual("slides-model", response.model_used)
-        self.assertEqual("/v1/files/presentation-file-id", response.file_url)
-        self.assertIn("[Скачать презентацию](/v1/files/presentation-file-id)", response.content)
+        self.assertEqual(expected_url, response.file_url)
+        self.assertIn(f"[Скачать презентацию]({expected_url})", response.content)
         self.assertEqual("anonymous", fake_storage.upload_calls[0]["user_id"])
 
     def test_parse_slides_accepts_design_fields(self) -> None:
@@ -500,6 +506,20 @@ class FileDownloadRouteTests(unittest.TestCase):
             [{"file_id": "presentation-file-id", "user_id": "anonymous"}],
             fake_storage.download_calls,
         )
+
+    def test_download_with_access_token_bypasses_user_header(self) -> None:
+        app = FastAPI()
+        app.include_router(files_module.router, prefix="/v1")
+        fake_storage = _FakeFileStorage()
+        access_token = build_file_access_token("presentation-file-id")
+
+        with patch.object(files_module, "file_storage", fake_storage):
+            response = TestClient(app).get(f"/v1/files/presentation-file-id?access_token={access_token}")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(b"pptx-bytes", response.content)
+        self.assertEqual([{"file_id": "presentation-file-id"}], fake_storage.shared_download_calls)
+        self.assertEqual([], fake_storage.download_calls)
 
 
 if __name__ == "__main__":
