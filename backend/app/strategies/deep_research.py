@@ -64,6 +64,7 @@ class DeepResearchStrategy:
                 "model": request.model_override,
                 "generation_options": request.generation_options,
                 "profile_text": request.memory_context.profile_prompt_text() if request.memory_context else "",
+                "workspace_instructions": request.workspace_instructions,
             }
         )
         sources = state.get("sources", [])
@@ -103,6 +104,7 @@ class DeepResearchStrategy:
                 role="system",
                 content=prompt_cache_manager.build_research_plan_system_prompt(
                     profile_text=state.get("profile_text", ""),
+                    workspace_instructions=state.get("workspace_instructions", ""),
                 ),
             ),
             ChatMessage(role="user", content=query),
@@ -196,6 +198,7 @@ class DeepResearchStrategy:
             state.get("plan_steps") or [],
             ranked_documents,
             state.get("profile_text", ""),
+            state.get("workspace_instructions", ""),
         )
         response = await mws_client.chat(
             messages,
@@ -296,6 +299,7 @@ class DeepResearchStrategy:
         plan_steps: list[str],
         ranked_documents: list[RankedDocument],
         profile_text: str,
+        workspace_instructions: str,
     ) -> list[ChatMessage]:
         plan_context = "\n".join(f"- {step}" for step in plan_steps) or "- Analyze the topic from the collected sources."
         source_context = build_source_context(ranked_documents, self.context_limit)
@@ -305,6 +309,7 @@ class DeepResearchStrategy:
                 content=append_technical_formatting_guidance(
                     prompt_cache_manager.build_research_synthesis_system_prompt(
                         profile_text=profile_text,
+                        workspace_instructions=workspace_instructions,
                     )
                 ),
             ),

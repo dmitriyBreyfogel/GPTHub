@@ -86,7 +86,9 @@ class VisionStrategy:
             ChatMessage(
                 role="system",
                 content=append_technical_formatting_guidance(
-                    prompt_cache_manager.build_vision_system_prompt()
+                    prompt_cache_manager.build_vision_system_prompt(
+                        workspace_instructions=request.workspace_instructions
+                    )
                 ),
             )
         ]

@@ -36,6 +36,7 @@ class SearchStrategy:
             search_query,
             results,
             request.memory_context.profile_prompt_text() if request.memory_context else "",
+            request.workspace_instructions,
         )
         response = await mws_client.chat(
             messages,
@@ -63,6 +64,7 @@ class SearchStrategy:
             search_query,
             results,
             request.memory_context.profile_prompt_text() if request.memory_context else "",
+            request.workspace_instructions,
         )
         async for chunk in mws_client.chat_stream(
             messages,
@@ -159,6 +161,7 @@ class SearchStrategy:
         search_query: str,
         results: list[SearchResult],
         profile_text: str,
+        workspace_instructions: str,
     ) -> list[ChatMessage]:
         search_context = self._search_context_payload(
             original_query=original_query,
@@ -170,7 +173,10 @@ class SearchStrategy:
             ChatMessage(
                 role="system",
                 content=append_technical_formatting_guidance(
-                    prompt_cache_manager.build_search_system_prompt(profile_text=profile_text)
+                    prompt_cache_manager.build_search_system_prompt(
+                        profile_text=profile_text,
+                        workspace_instructions=workspace_instructions,
+                    )
                 ),
             ),
             ChatMessage(

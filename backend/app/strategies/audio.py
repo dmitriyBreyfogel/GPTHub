@@ -99,12 +99,15 @@ class AudioStrategy:
         )
 
     def _text_request(self, request: StrategyRequest, transcript: str) -> StrategyRequest:
-        if request.text.strip():
-            text = f"{request.text.strip()}\n\nТранскрипт аудио:\n{transcript}"
-        else:
-            text = f"Проанализируй аудиозапись.\n\nТранскрипт аудио:\n{transcript}"
+        prompt = request.text.strip() or "Проанализируй аудиозапись по транскрипту и дай законченный полезный ответ."
+        text = (
+            "Режим: анализ аудиозаписи по транскрипту.\n\n"
+            f"Запрос пользователя:\n{prompt}\n\n"
+            "Транскрипт аудио:\n"
+            f"{transcript}"
+        )
         return StrategyRequest(
-            task_type=TaskType.TEXT,
+            task_type=TaskType.AUDIO,
             text=text,
             user_id=request.user_id,
             model_override=settings.default_text_model,

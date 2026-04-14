@@ -22,7 +22,7 @@ class WebParseStrategy:
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
         url = self._extract_url(request.text)
         page_text = await self._safe_fetch_page_text(url)
-        messages = self._build_messages(request.text, url, page_text)
+        messages = self._build_messages(request.text, url, page_text, request.workspace_instructions)
         response = await mws_client.chat(
             messages,
             model=request.model_override,
@@ -39,7 +39,7 @@ class WebParseStrategy:
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
         url = self._extract_url(request.text)
         page_text = await self._safe_fetch_page_text(url)
-        messages = self._build_messages(request.text, url, page_text)
+        messages = self._build_messages(request.text, url, page_text, request.workspace_instructions)
         async for chunk in mws_client.chat_stream(
             messages,
             model=request.model_override,
@@ -83,7 +83,13 @@ class WebParseStrategy:
         combined = "\n\n".join(part for part in [title, text] if part)
         return self._trim(combined, 16000)
 
-    def _build_messages(self, query: str, url: str | None, page_text: str) -> list[ChatMessage]:
+    def _build_messages(
+        self,
+        query: str,
+        url: str | None,
+        page_text: str,
+        workspace_instructions: str,
+    ) -> list[ChatMessage]:
         if url and page_text:
             user_content = (
                 "Запрос пользователя:\n"
@@ -112,7 +118,9 @@ class WebParseStrategy:
             ChatMessage(
                 role="system",
                 content=append_technical_formatting_guidance(
-                    prompt_cache_manager.build_web_parse_system_prompt()
+                    prompt_cache_manager.build_web_parse_system_prompt(
+                        workspace_instructions=workspace_instructions
+                    )
                 ),
             ),
             ChatMessage(role="user", content=user_content),

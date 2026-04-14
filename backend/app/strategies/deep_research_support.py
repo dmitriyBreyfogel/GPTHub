@@ -42,6 +42,7 @@ class ResearchState(TypedDict, total=False):
     model: str | None
     generation_options: dict | None
     profile_text: str
+    workspace_instructions: str
     plan_steps: list[str]
     search_queries: list[str]
     search_results: list[SearchResult]
