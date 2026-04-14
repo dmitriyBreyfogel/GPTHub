@@ -286,11 +286,18 @@ def _gpthub_file_id_from_container(container: object) -> str | None:
     if direct_file_id:
         return direct_file_id
 
-    for nested_key in ("data", "meta"):
+    for nested_key in ("data", "meta", "file", "image_url", "input_audio"):
         nested = container.get(nested_key)
         nested_file_id = _gpthub_file_id_from_container(nested)
         if nested_file_id:
             return nested_file_id
+
+    nested_files = container.get("files")
+    if isinstance(nested_files, list):
+        for item in nested_files:
+            nested_file_id = _gpthub_file_id_from_container(item)
+            if nested_file_id:
+                return nested_file_id
 
     return None
 

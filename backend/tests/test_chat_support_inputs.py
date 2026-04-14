@@ -236,6 +236,39 @@ class RequestFileParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(b"audio-bytes", files[0].file_bytes)
         self.assertEqual("audio/wav", files[0].file_content_type)
 
+    async def test_request_files_prefers_gpthub_file_id_nested_under_file_meta_data(self) -> None:
+        openwebui_file_id = "22222222-2222-2222-2222-222222222222"
+        gpthub_file_id = "33333333-3333-3333-3333-333333333333"
+        body = {
+            "files": [
+                {
+                    "id": openwebui_file_id,
+                    "name": "voice.mp3",
+                    "content_type": "audio/mpeg",
+                    "file": {
+                        "id": openwebui_file_id,
+                        "meta": {
+                            "name": "voice.mp3",
+                            "content_type": "audio/mpeg",
+                            "data": {
+                                "gpthub_file_id": gpthub_file_id,
+                            },
+                        },
+                    },
+                }
+            ]
+        }
+        storage = Mock()
+        storage.download = AsyncMock(return_value=(b"audio-bytes", "audio/mpeg"))
+
+        with patch("app.api.v1.chat_support.files.file_storage", storage):
+            files = await request_files(body, user_id="user-1")
+
+        self.assertEqual(1, len(files))
+        storage.download.assert_awaited_once_with(file_id=gpthub_file_id, user_id="user-1")
+        self.assertEqual(b"audio-bytes", files[0].file_bytes)
+        self.assertEqual("audio/mpeg", files[0].file_content_type)
+
     async def test_oversized_inline_base64_file_is_rejected(self) -> None:
         encoded = base64.b64encode(b"123456789").decode("ascii")
         body = {
