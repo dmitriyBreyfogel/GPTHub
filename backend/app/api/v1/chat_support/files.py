@@ -278,38 +278,73 @@ def _inline_request_files(body: dict) -> list[RequestFile]:
     )
 
 
+def _gpthub_file_id_from_container(container: object) -> str | None:
+    if not isinstance(container, dict):
+        return None
+
+    direct_file_id = string_value(container.get("gpthub_file_id")) or string_value(container.get("gpthubFileId"))
+    if direct_file_id:
+        return direct_file_id
+
+    for nested_key in ("data", "meta"):
+        nested = container.get(nested_key)
+        nested_file_id = _gpthub_file_id_from_container(nested)
+        if nested_file_id:
+            return nested_file_id
+
+    return None
+
+
+def _container_file_name(container: dict) -> str | None:
+    nested_file = container.get("file")
+    nested_meta = nested_file.get("meta") if isinstance(nested_file, dict) else None
+    container_meta = container.get("meta") if isinstance(container.get("meta"), dict) else None
+
+    return (
+        string_value(container.get("filename"))
+        or string_value(container.get("name"))
+        or (string_value(nested_file.get("filename")) if isinstance(nested_file, dict) else None)
+        or (string_value(nested_meta.get("name")) if isinstance(nested_meta, dict) else None)
+        or (string_value(container_meta.get("name")) if isinstance(container_meta, dict) else None)
+    )
+
+
+def _container_content_type(container: dict) -> str | None:
+    nested_file = container.get("file")
+    nested_meta = nested_file.get("meta") if isinstance(nested_file, dict) else None
+    container_meta = container.get("meta") if isinstance(container.get("meta"), dict) else None
+
+    return (
+        string_value(container.get("content_type"))
+        or string_value(container.get("mime_type"))
+        or (string_value(nested_file.get("content_type")) if isinstance(nested_file, dict) else None)
+        or (string_value(nested_meta.get("content_type")) if isinstance(nested_meta, dict) else None)
+        or (string_value(container_meta.get("content_type")) if isinstance(container_meta, dict) else None)
+    )
+
+
 def _file_ref_from_container(container: object) -> tuple[str, str | None, str | None] | None:
     if not isinstance(container, dict):
         return None
 
-    file_id = string_value(container.get("file_id")) or string_value(container.get("fileId"))
+    file_id = (
+        _gpthub_file_id_from_container(container)
+        or string_value(container.get("file_id"))
+        or string_value(container.get("fileId"))
+    )
     if file_id:
         return (
             file_id,
-            string_value(container.get("filename")) or string_value(container.get("name")),
-            string_value(container.get("content_type")) or string_value(container.get("mime_type")),
+            _container_file_name(container),
+            _container_content_type(container),
         )
 
     direct_file_id = uuid_value(container.get("id"))
     if direct_file_id:
-        nested_file = container.get("file")
-        nested_meta = nested_file.get("meta") if isinstance(nested_file, dict) else None
-        resolved_name = (
-            string_value(container.get("filename"))
-            or string_value(container.get("name"))
-            or (string_value(nested_file.get("filename")) if isinstance(nested_file, dict) else None)
-            or (string_value(nested_meta.get("name")) if isinstance(nested_meta, dict) else None)
-        )
-        resolved_content_type = (
-            string_value(container.get("content_type"))
-            or string_value(container.get("mime_type"))
-            or (string_value(nested_file.get("content_type")) if isinstance(nested_file, dict) else None)
-            or (string_value(nested_meta.get("content_type")) if isinstance(nested_meta, dict) else None)
-        )
         return (
             direct_file_id,
-            resolved_name,
-            resolved_content_type,
+            _container_file_name(container),
+            _container_content_type(container),
         )
 
     files = container.get("files")
@@ -317,17 +352,9 @@ def _file_ref_from_container(container: object) -> tuple[str, str | None, str | 
         for item in files:
             if not isinstance(item, dict):
                 continue
-            nested_file_id = (
-                string_value(item.get("file_id"))
-                or string_value(item.get("fileId"))
-                or uuid_value(item.get("id"))
-            )
-            if nested_file_id:
-                return (
-                    nested_file_id,
-                    string_value(item.get("filename")) or string_value(item.get("name")),
-                    string_value(item.get("content_type")) or string_value(item.get("mime_type")),
-                )
+            nested_file_ref = _file_ref_from_container(item)
+            if nested_file_ref is not None:
+                return nested_file_ref
 
     return None
 
