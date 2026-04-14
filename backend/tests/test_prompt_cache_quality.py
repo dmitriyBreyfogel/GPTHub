@@ -85,10 +85,23 @@ class PromptCacheQualityTests(unittest.TestCase):
 
         self.assertIn("полноценный, содержательный и законченный ответ", prompt)
         self.assertIn("не обзор «по верхам»", prompt)
-        self.assertIn("executive summary", prompt)
-        self.assertIn("Что подтверждено", prompt)
+        self.assertIn("Адаптируй структуру ответа к формату", prompt)
+        self.assertIn("не шаблонный executive summary", prompt)
         self.assertIn("Если какая-то часть вопроса не покрыта", prompt)
+        self.assertIn("Не создавай фиктивные ссылки", prompt)
         self.assertIn("Сначала дай вывод для руководителя", prompt)
+
+    def test_research_review_prompt_demands_grounded_rewrite(self) -> None:
+        prompt = prompt_cache_manager.build_research_review_system_prompt(
+            profile_text="Роль: архитектор",
+            workspace_instructions="Делай ответ пригодным для отправки заказчику",
+        )
+
+        self.assertIn("редактор и факт-чекер", prompt)
+        self.assertIn("Удали или перепиши любые утверждения", prompt)
+        self.assertIn("1-2 id на тезис", prompt)
+        self.assertIn("не перечисляй URL в теле ответа", prompt)
+        self.assertIn("Делай ответ пригодным для отправки заказчику", prompt)
 
     def test_query_rewrite_prompt_preserves_anchor_entities_and_recency(self) -> None:
         prompt = prompt_cache_manager.build_query_rewrite_system_prompt()
