@@ -27,8 +27,10 @@ from app.strategies.deep_research_support import (
     domain_key,
     expand_research_queries,
     fallback_plan_step,
+    normalize_citation_style,
     normalize_url,
     research_result_score,
+    research_verbosity_instruction,
     select_relevant_passages,
     trim_text,
 )
@@ -240,7 +242,8 @@ class DeepResearchStrategy:
             model=state.get("model"),
             generation_options=state.get("generation_options"),
         )
-        final_answer = append_sources_section(reviewed_answer or response.content, ranked_documents)
+        normalized_answer = normalize_citation_style(reviewed_answer or response.content)
+        final_answer = append_sources_section(normalized_answer, ranked_documents)
         return {"answer": final_answer, "sources": [document.url for document in ranked_documents]}
 
     async def _safe_search(self, query: str) -> list[SearchResult]:
@@ -301,6 +304,7 @@ class DeepResearchStrategy:
     ) -> list[ChatMessage]:
         plan_context = "\n".join(f"- {step}" for step in plan_steps) or "- Analyze the topic from the collected sources."
         source_context = build_source_context(ranked_documents, self.context_limit, resolved_query)
+        verbosity_instruction = research_verbosity_instruction(display_query)
         return [
             ChatMessage(
                 role="system",
@@ -322,6 +326,8 @@ class DeepResearchStrategy:
                     f"{plan_context}\n\n"
                     "Collected sources JSON:\n"
                     f"{source_context}\n\n"
+                    "Verbosity guidance:\n"
+                    f"{verbosity_instruction}\n\n"
                     "Write a detailed answer grounded only in the collected sources. "
                     "Prefer official sources when available. "
                     "Cite sources only by their numeric ids. "
@@ -347,6 +353,7 @@ class DeepResearchStrategy:
             return draft_answer
 
         source_context = build_source_context(ranked_documents, self.context_limit, resolved_query)
+        verbosity_instruction = research_verbosity_instruction(display_query)
         messages = [
             ChatMessage(
                 role="system",
@@ -368,6 +375,8 @@ class DeepResearchStrategy:
                     f"{draft_answer}\n\n"
                     "Collected sources JSON:\n"
                     f"{source_context}\n\n"
+                    "Verbosity guidance:\n"
+                    f"{verbosity_instruction}\n\n"
                     "Rewrite the draft into the final answer. "
                     "Keep only supported claims, improve completeness where sources allow, and do not output a separate sources section."
                 ),

@@ -218,10 +218,29 @@ _NARRATIVE_MARKERS = (
     "обзор",
 )
 
+_SHORT_RESPONSE_MARKERS = (
+    "brief",
+    "concise",
+    "short",
+    "summary",
+    "tl;dr",
+    "в двух абзацах",
+    "в двух предложениях",
+    "в нескольких предложениях",
+    "вкратце",
+    "кратк",
+    "коротк",
+    "поменьше",
+    "сжато",
+)
+
 _SOURCE_SECTION_PATTERN = re.compile(
     r"\n(?:#{1,6}\s*)?(?:Источники|Sources)\s*:?\s*\n[\s\S]*$",
     re.IGNORECASE,
 )
+_INLINE_CITATION_LIST_PATTERN = re.compile(r"\[(\d+)(?:\s*,\s*\d+)+\]")
+_ADJACENT_CITATIONS_PATTERN = re.compile(r"(\[\d+\])(?:\s*(?:,|;)?\s*\[\d+\])+")
+_SINGLE_CITATION_PATTERN = re.compile(r"\[(\d+)\]")
 
 
 def contains_cyrillic(text: str) -> bool:
@@ -389,6 +408,31 @@ def append_sources_section(answer: str, ranked_documents: list[RankedDocument]) 
     return f"{body.rstrip()}\n\n{sources_block}"
 
 
+def normalize_citation_style(answer: str) -> str:
+    body = strip_sources_section(answer)
+    if not body:
+        return ""
+
+    paragraphs = body.split("\n\n")
+    normalized_paragraphs = [_normalize_paragraph_citations(paragraph) for paragraph in paragraphs]
+    return "\n\n".join(paragraph for paragraph in normalized_paragraphs if paragraph.strip()).strip()
+
+
+def research_verbosity_instruction(query: str) -> str:
+    lowered = (query or "").lower()
+    if any(marker in lowered for marker in _SHORT_RESPONSE_MARKERS):
+        return (
+            "Пользователь явно просит краткий формат. "
+            "Дай компактный ответ без потери сути: обычно 2-4 абзаца или до 6 пунктов."
+        )
+    return (
+        "Пользователь не просит краткость. "
+        "По умолчанию дай развернутый и внушительный ответ: обычно не менее 7-10 содержательных абзацев "
+        "или эквивалентный объем, если тема это поддерживает. Раскрой определения, ключевые аспекты, "
+        "детали, примеры, ограничения и практические выводы, но без воды."
+    )
+
+
 def format_sources_section(ranked_documents: list[RankedDocument]) -> str:
     if not ranked_documents:
         return "Источники:\n1. Источники не найдены."
@@ -436,3 +480,25 @@ def _passage_chunks(text: str) -> list[str]:
     if current:
         chunks.append(" ".join(current))
     return chunks or paragraphs
+
+
+def _normalize_paragraph_citations(paragraph: str) -> str:
+    text = paragraph.strip()
+    if not text:
+        return ""
+
+    text = _INLINE_CITATION_LIST_PATTERN.sub(r"[\1]", text)
+    text = _ADJACENT_CITATIONS_PATTERN.sub(r"\1", text)
+    citations = _SINGLE_CITATION_PATTERN.findall(text)
+    if len(citations) <= 1:
+        return text
+
+    kept = citations[0]
+    text_without_citations = _SINGLE_CITATION_PATTERN.sub("", text)
+    text_without_citations = re.sub(r"\s{2,}", " ", text_without_citations).strip()
+    text_without_citations = re.sub(r"\s+([,.;:!?])", r"\1", text_without_citations)
+    if not text_without_citations:
+        return f"[{kept}]"
+    if text_without_citations[-1] in ".!?":
+        return f"{text_without_citations[:-1].rstrip()} [{kept}]{text_without_citations[-1]}"
+    return f"{text_without_citations} [{kept}]"

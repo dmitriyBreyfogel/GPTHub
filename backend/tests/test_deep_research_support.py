@@ -20,6 +20,8 @@ from app.strategies.deep_research_support import (
     RankedDocument,
     append_sources_section,
     expand_research_queries,
+    normalize_citation_style,
+    research_verbosity_instruction,
 )
 
 
@@ -76,6 +78,29 @@ class DeepResearchSupportTests(unittest.TestCase):
         self.assertIn("1. SOLID principles explained - https://example.com/solid", answer)
         self.assertIn("2. Dependency inversion examples - https://example.com/dip", answer)
         self.assertNotIn("1. [1]", answer)
+
+    def test_normalize_citation_style_keeps_single_source_per_paragraph(self) -> None:
+        answer = (
+            "SOLID helps structure maintainable OOP systems [1,2,3]. "
+            "It also reduces coupling when applied consistently [4].\n\n"
+            "DIP is especially useful in testable architectures [5] [6] [7]."
+        )
+
+        normalized = normalize_citation_style(answer)
+
+        self.assertNotIn("[1,2,3]", normalized)
+        self.assertNotIn("[5] [6]", normalized)
+        self.assertEqual(2, normalized.count("["))
+        self.assertIn("[1]", normalized)
+        self.assertIn("[5]", normalized)
+
+    def test_research_verbosity_instruction_defaults_to_large_answer(self) -> None:
+        instruction = research_verbosity_instruction("Напиши мне доклад на тему принципы SOLID в ООП")
+        self.assertIn("не менее 7-10 содержательных абзацев", instruction)
+
+    def test_research_verbosity_instruction_respects_short_request(self) -> None:
+        instruction = research_verbosity_instruction("Кратко объясни принципы SOLID")
+        self.assertIn("2-4 абзаца", instruction)
 
 
 if __name__ == "__main__":
