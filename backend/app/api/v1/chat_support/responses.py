@@ -46,6 +46,8 @@ def gpthub_metadata_from_response(response: StrategyResponse) -> dict:
         gpthub["file_url"] = response.file_url
     if response.sources:
         gpthub["sources"] = response.sources
+    if response.orchestration:
+        gpthub["orchestration"] = response.orchestration
     return gpthub
 
 
@@ -89,6 +91,24 @@ def openai_stream_metadata(decision: RoutingDecision) -> bytes:
             }
         ],
         "gpthub": gpthub_metadata_from_decision(decision),
+    }
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+def openai_stream_metadata_from_response(response: StrategyResponse) -> bytes:
+    payload = {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": response.model_used,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {},
+                "finish_reason": None,
+            }
+        ],
+        "gpthub": gpthub_metadata_from_response(response),
     }
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
 

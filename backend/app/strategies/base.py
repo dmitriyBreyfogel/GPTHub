@@ -54,6 +54,7 @@ class StrategyResponse:
     routing_method: str | None = None
     routing_confidence: float | None = None
     manual_override: bool | None = None
+    orchestration: dict | None = None
 
 
 @runtime_checkable

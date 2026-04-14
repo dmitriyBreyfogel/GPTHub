@@ -47,6 +47,38 @@ def task_type_override(body: dict) -> str | None:
     return None
 
 
+def gpthub_model_mode(body: dict) -> str | None:
+    metadata = body.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+
+    raw_mode = metadata.get("gpthub_model_mode") or metadata.get("gpthubModelMode")
+    if not isinstance(raw_mode, str):
+        return None
+
+    normalized = raw_mode.strip().lower()
+    if normalized in {"auto", "custom"}:
+        return normalized
+    return None
+
+
+def gpthub_routing_models(body: dict) -> dict[str, str] | None:
+    metadata = body.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+
+    raw_value = metadata.get("gpthub_routing_models") or metadata.get("gpthubRoutingModels")
+    if not isinstance(raw_value, dict):
+        return None
+
+    normalized = {
+        key: value.strip()
+        for key, value in raw_value.items()
+        if key in {"text", "image", "audio"} and isinstance(value, str) and value.strip()
+    }
+    return normalized or None
+
+
 def workspace_id(body: dict, header_workspace_id: str | None = None) -> str | None:
     raw_workspace_id = (
         string_value(body.pop("workspace_id", None))

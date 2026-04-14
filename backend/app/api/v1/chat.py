@@ -13,11 +13,14 @@ from app.api.v1.chat_support.memory_support import (
     resolve_user_id,
 )
 from app.api.v1.chat_support.openapi import CHAT_COMPLETIONS_OPENAPI_EXTRA
+from app.api.v1.chat_support.orchestration import build_chat_execution_plan
 from app.api.v1.chat_support.parsing import content_to_text, last_user_text, task_type_override
 from app.api.v1.chat_support.responses import (
     gpthub_metadata_from_decision,
+    openai_stream_metadata_from_response,
     openai_response,
     routing_headers,
+    synthetic_openai_stream_from_strategy_response,
 )
 from app.api.v1.chat_support.strategy_requests import build_strategy_request
 from app.api.v1.chat_support.streams import strategy_stream_response, upstream_stream_response
@@ -44,12 +47,56 @@ async def chat_completions(
     request_files = await resolve_request_files(body, user_id)
     request_workspace = await resolve_request_workspace(body, user_id, request.headers.get("x-workspace-id"))
     memory_context = await build_memory_context(user_id, user_text, memory_enabled)
+    requested_task_type = task_type_override(body)
+    execution_plan = await build_chat_execution_plan(
+        body,
+        user_id=user_id,
+        user_text=user_text,
+        requested_task_type=requested_task_type,
+        request_files=request_files,
+        request_workspace=request_workspace,
+        memory_context=memory_context,
+    )
+
+    is_streaming = body.get("stream", False)
+
+    if execution_plan.direct_response is not None and execution_plan.direct_decision is not None:
+        headers = routing_headers(execution_plan.direct_decision)
+        strategy_response = model_router.enrich_response(
+            execution_plan.direct_decision,
+            execution_plan.direct_response,
+        )
+        if is_streaming:
+            async def _direct_stream():
+                yield openai_stream_metadata_from_response(strategy_response)
+                async for chunk in synthetic_openai_stream_from_strategy_response(strategy_response):
+                    yield chunk
+                await persist_memory(
+                    user_id=user_id,
+                    query=user_text,
+                    assistant_answer=strategy_response.content,
+                    memory_context=memory_context,
+                )
+
+            return StreamingResponse(
+                _direct_stream(),
+                media_type="text/event-stream",
+                headers=headers,
+            )
+
+        await persist_memory(
+            user_id=user_id,
+            query=user_text,
+            assistant_answer=strategy_response.content,
+            memory_context=memory_context,
+        )
+        return JSONResponse(content=openai_response(strategy_response), headers=headers)
 
     decision = await model_router.route(
         user_text,
         user_id=user_id,
-        model_override=body.get("model") or request_workspace.model,
-        task_type_override=task_type_override(body),
+        model_override=execution_plan.model_override,
+        task_type_override=execution_plan.task_type_override,
         request_files=request_files,
         context_messages=body.get("messages") if isinstance(body.get("messages"), list) else None,
     )
@@ -65,8 +112,6 @@ async def chat_completions(
         request_workspace,
         memory_context,
     )
-
-    is_streaming = body.get("stream", False)
 
     if decision.strategy is not None:
         if is_streaming:

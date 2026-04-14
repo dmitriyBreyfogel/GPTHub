@@ -71,5 +71,7 @@ def stream_chunk(
             gpthub["file_url"] = response.file_url
         if response.sources:
             gpthub["sources"] = response.sources
+        if response.orchestration:
+            gpthub["orchestration"] = response.orchestration
         payload["gpthub"] = gpthub
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
