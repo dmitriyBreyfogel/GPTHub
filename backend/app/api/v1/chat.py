@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -15,6 +17,7 @@ from app.api.v1.chat_support.memory_support import (
 from app.api.v1.chat_support.openapi import CHAT_COMPLETIONS_OPENAPI_EXTRA
 from app.api.v1.chat_support.orchestration import build_chat_execution_plan
 from app.api.v1.chat_support.parsing import content_to_text, last_user_text, task_type_override
+from app.api.v1.chat_support.request_guards import sanitize_chat_body
 from app.api.v1.chat_support.responses import (
     gpthub_metadata_from_decision,
     openai_stream_metadata_from_response,
@@ -26,9 +29,17 @@ from app.api.v1.chat_support.strategy_requests import build_strategy_request
 from app.api.v1.chat_support.streams import strategy_stream_response, upstream_stream_response
 from app.api.v1.chat_support.workspaces import request_workspace as resolve_request_workspace
 from app.core.config import settings
+from app.core.rate_limit import RateLimitRule, rate_limiter, request_subject
 from app.core.router import model_router
 
 router = APIRouter()
+
+_CHAT_RATE_LIMIT = RateLimitRule(
+    scope="chat:completions",
+    limit=60,
+    window_seconds=600,
+    detail="Chat request quota exceeded. Please retry later.",
+)
 
 
 @router.post("/chat/completions", openapi_extra=CHAT_COMPLETIONS_OPENAPI_EXTRA)
@@ -37,11 +48,16 @@ async def chat_completions(
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
 ):
-    body = await request.json()
     user_id = resolve_user_id(
         x_user_id=x_user_id,
         x_openwebui_user_id=x_openwebui_user_id,
     )
+    await rate_limiter.enforce(subject=request_subject(request, user_id), rule=_CHAT_RATE_LIMIT)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON") from exc
+    body = sanitize_chat_body(body)
     user_text = last_user_text(body)
     memory_enabled = request_memory_enabled(body)
     request_files = await resolve_request_files(body, user_id)

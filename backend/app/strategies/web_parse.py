@@ -8,6 +8,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.core.prompt_cache import prompt_cache_manager
+from app.core.resource_limits import MAX_WEB_FETCH_BYTES
 from app.core.response_formatting import append_technical_formatting_guidance
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
@@ -71,10 +72,11 @@ class WebParseStrategy:
             follow_redirects=True,
             headers={"User-Agent": "GPTHub/1.0"},
         ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                html = await self._read_limited_response(response)
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
         for tag in soup(["script", "style", "noscript", "svg"]):
             tag.decompose()
 
@@ -82,6 +84,20 @@ class WebParseStrategy:
         text = soup.get_text("\n", strip=True)
         combined = "\n\n".join(part for part in [title, text] if part)
         return self._trim(combined, 16000)
+
+    async def _read_limited_response(self, response: httpx.Response) -> str:
+        chunks: list[bytes] = []
+        total_bytes = 0
+        async for chunk in response.aiter_bytes():
+            total_bytes += len(chunk)
+            if total_bytes > MAX_WEB_FETCH_BYTES:
+                break
+            chunks.append(chunk)
+        data = b"".join(chunks)
+        try:
+            return data.decode(response.encoding or "utf-8", errors="ignore")
+        except LookupError:
+            return data.decode("utf-8", errors="ignore")
 
     def _build_messages(
         self,
@@ -130,4 +146,4 @@ class WebParseStrategy:
         normalized = "\n".join(line.strip() for line in text.splitlines() if line.strip())
         if len(normalized) <= limit:
             return normalized
-        return normalized[: limit - 1].rstrip() + "…"
+        return normalized[: limit - 3].rstrip() + "..."

@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from app.api.v1.chat_support.contracts import RequestFile
 from app.api.v1.chat_support.errors import exception_detail
 from app.api.v1.chat_support.parsing import string_value, uuid_value
+from app.core.resource_limits import MAX_INLINE_FILE_BYTES, estimate_base64_decoded_size
 from app.storage.files import file_storage
 
 
@@ -18,6 +19,11 @@ def _decode_base64(value: str) -> bytes | None:
         return None
 
 
+def _ensure_inline_file_size(value: str) -> None:
+    if estimate_base64_decoded_size(value) > MAX_INLINE_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Inline file is too large")
+
+
 def _file_from_data_url(value: str, file_name: str | None = None) -> RequestFile | None:
     if not value.startswith("data:") or "," not in value:
         return None
@@ -25,6 +31,7 @@ def _file_from_data_url(value: str, file_name: str | None = None) -> RequestFile
     if ";base64" not in header.lower():
         return None
     content_type = header[5:].split(";", 1)[0] or "application/octet-stream"
+    _ensure_inline_file_size(encoded)
     decoded = _decode_base64(encoded)
     if decoded is None:
         return None
@@ -32,6 +39,7 @@ def _file_from_data_url(value: str, file_name: str | None = None) -> RequestFile
 
 
 def _file_from_base64(value: str, file_name: str | None = None, content_type: str | None = None) -> RequestFile | None:
+    _ensure_inline_file_size(value)
     decoded = _decode_base64(value)
     if decoded is None:
         return None

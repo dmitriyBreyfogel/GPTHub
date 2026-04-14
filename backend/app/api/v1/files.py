@@ -1,30 +1,44 @@
-from fastapi import APIRouter, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 
 from app.core.file_types import normalize_content_type
-from app.storage.files import file_storage, verify_file_access_token
+from app.core.rate_limit import RateLimitRule, rate_limiter, request_subject
+from app.core.resource_limits import MAX_FILE_UPLOAD_BYTES, normalize_filename, read_upload_bytes
+from app.storage.files import FileQuotaExceededError, file_storage, verify_file_access_token
 
 router = APIRouter()
 
-_MAX_FILE_SIZE = 50 * 1024 * 1024
+_FILE_WRITE_RATE_LIMIT = RateLimitRule(
+    scope="files:write",
+    limit=20,
+    window_seconds=600,
+    detail="File upload quota exceeded. Please retry later.",
+)
 
 
 @router.post("/files", status_code=201)
-async def upload_file(file: UploadFile, x_user_id: str = Header(...)):
-    data = await file.read()
-    if len(data) > _MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
-
-    content_type = normalize_content_type(file.content_type, filename=file.filename) or "application/octet-stream"
-    stored = await file_storage.upload(
-        file_bytes=data,
-        filename=file.filename or "upload",
-        content_type=content_type,
-        user_id=x_user_id,
+async def upload_file(request: Request, file: UploadFile, x_user_id: str = Header(...)):
+    await rate_limiter.enforce(subject=request_subject(request, x_user_id), rule=_FILE_WRITE_RATE_LIMIT)
+    data = await read_upload_bytes(
+        file,
+        max_bytes=MAX_FILE_UPLOAD_BYTES,
+        detail="File too large (max 50 MB)",
     )
+
+    safe_filename = normalize_filename(file.filename, fallback="upload")
+    content_type = normalize_content_type(file.content_type, filename=safe_filename) or "application/octet-stream"
+    try:
+        stored = await file_storage.upload(
+            file_bytes=data,
+            filename=safe_filename,
+            content_type=content_type,
+            user_id=x_user_id,
+        )
+    except FileQuotaExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {
         "file_id": stored.file_id,
-        "filename": file.filename,
+        "filename": safe_filename,
         "content_type": stored.content_type,
         "size_bytes": stored.size_bytes,
     }
@@ -58,8 +72,8 @@ async def download_file(
             data, content_type = await file_storage.download_shared(file_id=file_id)
         else:
             data, content_type = await file_storage.download(file_id=file_id, user_id=x_user_id)
-    except PermissionError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return Response(content=data, media_type=content_type)
 
 
@@ -67,5 +81,5 @@ async def download_file(
 async def delete_file(file_id: str, x_user_id: str = Header(...)):
     try:
         await file_storage.delete(file_id=file_id, user_id=x_user_id)
-    except PermissionError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

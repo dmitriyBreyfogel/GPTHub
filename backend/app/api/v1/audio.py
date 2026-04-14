@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.file_types import normalize_content_type
+from app.core.rate_limit import RateLimitRule, rate_limiter, request_subject
+from app.core.resource_limits import MAX_AUDIO_UPLOAD_BYTES, MAX_TTS_INPUT_CHARS, read_upload_bytes
 from app.providers.mws_gpt import mws_client
 
 router = APIRouter()
@@ -26,8 +28,23 @@ class TTSRequest(BaseModel):
     speed: float = 1.0
 
 
+_ASR_RATE_LIMIT = RateLimitRule(
+    scope="audio:transcriptions",
+    limit=10,
+    window_seconds=600,
+    detail="Audio transcription quota exceeded. Please retry later.",
+)
+_TTS_RATE_LIMIT = RateLimitRule(
+    scope="audio:speech",
+    limit=20,
+    window_seconds=600,
+    detail="Text-to-speech quota exceeded. Please retry later.",
+)
+
+
 @router.post("/audio/transcriptions")
 async def transcribe_audio(
+    request: Request,
     file: UploadFile,
     model: str = Form(default=None),
     language: str = Form(default=None),
@@ -36,7 +53,12 @@ async def transcribe_audio(
     temperature: float = Form(default=0.0),
     x_user_id: str = Header(default="anonymous"),
 ):
-    data = await file.read()
+    await rate_limiter.enforce(subject=request_subject(request, x_user_id), rule=_ASR_RATE_LIMIT)
+    data = await read_upload_bytes(
+        file,
+        max_bytes=MAX_AUDIO_UPLOAD_BYTES,
+        detail="Audio file too large (max 25 MB)",
+    )
     if not data:
         raise HTTPException(status_code=400, detail="Empty audio file")
 
@@ -58,9 +80,12 @@ async def transcribe_audio(
 
 
 @router.post("/audio/speech")
-async def text_to_speech(body: TTSRequest):
+async def text_to_speech(request: Request, body: TTSRequest):
     if not body.input or not body.input.strip():
         raise HTTPException(status_code=400, detail="input is required")
+    if len(body.input) > MAX_TTS_INPUT_CHARS:
+        raise HTTPException(status_code=413, detail="TTS input is too large")
+    await rate_limiter.enforce(subject=request_subject(request, "anonymous"), rule=_TTS_RATE_LIMIT)
 
     fmt = body.response_format if body.response_format in _AUDIO_CONTENT_TYPES else "mp3"
     media_type = _AUDIO_CONTENT_TYPES[fmt]

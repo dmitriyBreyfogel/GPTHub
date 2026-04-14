@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1 import chat as chat_module
 from app.api.v1.chat_support.contracts import RequestFile, RequestWorkspace
+from app.core.resource_limits import MAX_CHAT_MESSAGES, MAX_UPSTREAM_MAX_TOKENS
 from app.core.router import RoutingDecision
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
@@ -447,6 +448,42 @@ class ChatCompletionsFlowTests(unittest.TestCase):
         self.assertEqual("provider-selected-model", body["model"])
         self.assertEqual("text", body["gpthub"]["task_type"])
         self.assertEqual("provider-selected-model", body["gpthub"]["model"])
+
+    def test_chat_request_is_sanitized_before_routing(self) -> None:
+        strategy = _FakeStrategy(TaskType.TEXT)
+        fake_router = _FakeRouter(
+            _decision(task_type=TaskType.TEXT, model="guarded-model", strategy=strategy)
+        )
+        messages = [{"role": "user", "content": f"msg-{index}"} for index in range(MAX_CHAT_MESSAGES + 25)]
+
+        with (
+            patch.object(chat_module, "model_router", fake_router),
+            patch.object(chat_module, "resolve_request_files", new=AsyncMock(return_value=[])),
+            patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
+        ):
+            response = _test_client().post(
+                "/v1/chat/completions",
+                headers={"x-user-id": "user-123"},
+                json={
+                    "model": "  custom-model  ",
+                    "messages": messages,
+                    "max_tokens": MAX_UPSTREAM_MAX_TOKENS + 500,
+                    "temperature": 99,
+                },
+            )
+
+        self.assertEqual(200, response.status_code)
+        route_call = fake_router.route_calls[0]
+        self.assertEqual("custom-model", route_call["model_override"])
+        self.assertEqual(MAX_CHAT_MESSAGES, len(route_call["context_messages"]))
+        self.assertEqual("msg-25", route_call["context_messages"][0]["content"])
+        self.assertEqual(f"msg-{MAX_CHAT_MESSAGES + 24}", route_call["context_messages"][-1]["content"])
+
+        strategy_request = strategy.execute_requests[0]
+        self.assertEqual(
+            {"max_tokens": MAX_UPSTREAM_MAX_TOKENS, "temperature": 2.0},
+            strategy_request.generation_options,
+        )
 
 
 if __name__ == "__main__":

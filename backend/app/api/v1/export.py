@@ -7,11 +7,26 @@ from pathlib import Path
 from typing import Any, Literal
 from xml.sax.saxutils import escape
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from app.core.rate_limit import RateLimitRule, rate_limiter, request_subject
+from app.core.resource_limits import (
+    MAX_EXPORT_MESSAGES,
+    MAX_EXPORT_TITLE_CHARS,
+    MAX_EXPORT_TOTAL_CHARS,
+    normalize_single_line_text,
+)
+
 router = APIRouter()
+
+_EXPORT_RATE_LIMIT = RateLimitRule(
+    scope="export",
+    limit=20,
+    window_seconds=600,
+    detail="Export quota exceeded. Please retry later.",
+)
 
 
 class ExportMessage(BaseModel):
@@ -27,12 +42,20 @@ class ExportRequest(BaseModel):
 
 
 @router.post("/export")
-async def export_dialog(body: ExportRequest):
+async def export_dialog(request: Request, body: ExportRequest):
+    await rate_limiter.enforce(subject=request_subject(request, "anonymous"), rule=_EXPORT_RATE_LIMIT)
+    if len(body.messages) > MAX_EXPORT_MESSAGES:
+        raise HTTPException(status_code=413, detail="Too many messages in export")
+
     messages = [_export_message(message) for message in body.messages]
     if not messages:
         raise HTTPException(status_code=400, detail="messages must not be empty")
 
-    title = _clean_text(body.title) or "Диалог GPTHub"
+    total_chars = sum(len(message["content"]) for message in messages)
+    if total_chars > MAX_EXPORT_TOTAL_CHARS:
+        raise HTTPException(status_code=413, detail="Export payload is too large")
+
+    title = normalize_single_line_text(_clean_text(body.title), MAX_EXPORT_TITLE_CHARS) or "Диалог GPTHub"
     if body.format == "docx":
         content = _build_docx(title, messages)
         return _file_response(
@@ -108,7 +131,7 @@ def _build_pdf(title: str, messages: list[dict[str, str]]) -> bytes:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import mm
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
     except ImportError as exc:
         raise HTTPException(status_code=500, detail="reportlab is not installed") from exc
 
@@ -175,9 +198,9 @@ def _build_pdf(title: str, messages: list[dict[str, str]]) -> bytes:
 
 def _pdf_font_name() -> str:
     try:
+        import reportlab
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
-        import reportlab
     except ImportError:
         return "Helvetica"
 

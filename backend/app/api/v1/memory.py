@@ -1,15 +1,32 @@
 import re
 import time
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.api.v1.chat_support.memory_support import resolve_user_id
+from app.core.rate_limit import RateLimitRule, rate_limiter, request_subject
+from app.core.resource_limits import (
+    MAX_MANAGED_MEMORY_ITEMS,
+    MAX_MEMORY_MESSAGES,
+    MAX_MEMORY_MESSAGE_CHARS,
+    MAX_MEMORY_TOTAL_CHARS,
+    MAX_PROFILE_NAME_CHARS,
+    MAX_PROFILE_ROLE_CHARS,
+    normalize_single_line_text,
+)
 from app.memory.mem0_client import IMemoryClient, MemoryUnavailableError, get_memory_client
 from app.memory.orchestrator import memory_orchestrator
-from app.memory.profile import UserProfile, profile_repo
+from app.memory.profile import UserProfile, normalize_profile, profile_repo
 
 router = APIRouter()
+
+_MEMORY_WRITE_RATE_LIMIT = RateLimitRule(
+    scope="memory:write",
+    limit=30,
+    window_seconds=600,
+    detail="Memory write quota exceeded. Please retry later.",
+)
 
 
 class AddMemoryRequest(BaseModel):
@@ -167,6 +184,42 @@ def _is_noise_memory_text(text: str) -> bool:
         if _is_generic_role(value):
             return True
     return False
+
+
+def _normalize_managed_content(content: str) -> str:
+    return normalize_single_line_text(content, memory_orchestrator.max_fact_length)
+
+
+def _normalize_profile_payload(body: ProfileUpdateRequest, user_id: str) -> UserProfile:
+    return normalize_profile(
+        UserProfile(
+            user_id=user_id,
+            name=normalize_single_line_text(body.name, MAX_PROFILE_NAME_CHARS),
+            role=normalize_single_line_text(body.role, MAX_PROFILE_ROLE_CHARS),
+            preferences=body.preferences,
+            core_facts=body.core_facts,
+        )
+    )
+
+
+def _sanitize_memory_messages(messages: list[dict]) -> list[dict]:
+    if len(messages) > MAX_MEMORY_MESSAGES:
+        raise HTTPException(status_code=413, detail="Too many memory messages in one request")
+
+    sanitized: list[dict] = []
+    total_chars = 0
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = normalize_single_line_text(message.get("role"), 32) or "user"
+        content = normalize_single_line_text(message.get("content"), MAX_MEMORY_MESSAGE_CHARS)
+        if not content:
+            continue
+        total_chars += len(content)
+        if total_chars > MAX_MEMORY_TOTAL_CHARS:
+            raise HTTPException(status_code=413, detail="Memory payload is too large")
+        sanitized.append({"role": role, "content": content})
+    return sanitized
 
 
 def _profile_memory_items(user_id: str, profile: UserProfile) -> list[ManagedMemoryItem]:
@@ -351,6 +404,8 @@ async def _managed_memories_for_user(user_id: str) -> list[ManagedMemoryItem]:
     items = list(profile_items)
     seen_keys = {_canonical_memory_key(item.content) for item in profile_items if _canonical_memory_key(item.content)}
     for item in _memory_fact_items(user_id, memories):
+        if len(items) >= MAX_MANAGED_MEMORY_ITEMS:
+            break
         key = _canonical_memory_key(item.content)
         if key and key in seen_keys:
             continue
@@ -362,12 +417,19 @@ async def _managed_memories_for_user(user_id: str) -> list[ManagedMemoryItem]:
 
 @router.post("/memory", status_code=201)
 async def add_memory(
+    request: Request,
     body: AddMemoryRequest,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
 ):
     user_id = resolve_user_id(x_user_id=x_user_id, x_openwebui_user_id=x_openwebui_user_id)
-    await _memory_client().add(messages=body.messages, user_id=user_id)
+    await rate_limiter.enforce(subject=request_subject(request, user_id), rule=_MEMORY_WRITE_RATE_LIMIT)
+    if len(await _managed_memories_for_user(user_id)) >= MAX_MANAGED_MEMORY_ITEMS:
+        raise HTTPException(status_code=429, detail="Memory capacity reached. Clear old memory first.")
+    sanitized_messages = _sanitize_memory_messages(body.messages)
+    if not sanitized_messages:
+        raise HTTPException(status_code=400, detail="messages must contain at least one non-empty item")
+    await _memory_client().add(messages=sanitized_messages, user_id=user_id)
     return {"status": "ok"}
 
 
@@ -378,7 +440,7 @@ async def get_memories(
 ):
     user_id = resolve_user_id(x_user_id=x_user_id, x_openwebui_user_id=x_openwebui_user_id)
     memories = await _memory_client().get_all(user_id=user_id)
-    return {"memories": memories}
+    return {"memories": memories[:MAX_MANAGED_MEMORY_ITEMS]}
 
 
 @router.get("/profile")
@@ -393,18 +455,14 @@ async def get_profile(
 
 @router.put("/profile")
 async def update_profile(
+    request: Request,
     body: ProfileUpdateRequest,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
 ):
     user_id = resolve_user_id(x_user_id=x_user_id, x_openwebui_user_id=x_openwebui_user_id)
-    profile = UserProfile(
-        user_id=user_id,
-        name=body.name,
-        role=body.role,
-        preferences=body.preferences,
-        core_facts=body.core_facts,
-    )
+    await rate_limiter.enforce(subject=request_subject(request, user_id), rule=_MEMORY_WRITE_RATE_LIMIT)
+    profile = _normalize_profile_payload(body, user_id)
     await profile_repo.save(profile)
     return profile.to_json()
 
@@ -420,14 +478,18 @@ async def get_managed_memories(
 
 @router.post("/memory/manage", response_model=ManagedMemoryItem)
 async def add_managed_memory(
+    request: Request,
     body: ManagedMemoryCreateRequest,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
 ):
     user_id = resolve_user_id(x_user_id=x_user_id, x_openwebui_user_id=x_openwebui_user_id)
-    content = " ".join((body.content or "").split()).strip()
+    await rate_limiter.enforce(subject=request_subject(request, user_id), rule=_MEMORY_WRITE_RATE_LIMIT)
+    content = _normalize_managed_content(body.content)
     if not content:
         raise HTTPException(status_code=400, detail="Memory content is required")
+    if len(await _managed_memories_for_user(user_id)) >= MAX_MANAGED_MEMORY_ITEMS:
+        raise HTTPException(status_code=429, detail="Memory capacity reached. Clear old memory first.")
 
     before_items = await _managed_memories_for_user(user_id)
     before_ids = {item.id for item in before_items}
@@ -456,13 +518,15 @@ async def add_managed_memory(
 
 @router.post("/memory/manage/{memory_id}/update", response_model=ManagedMemoryItem)
 async def update_managed_memory(
+    request: Request,
     memory_id: str,
     body: ManagedMemoryUpdateRequest,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
 ):
     user_id = resolve_user_id(x_user_id=x_user_id, x_openwebui_user_id=x_openwebui_user_id)
-    content = " ".join((body.content or "").split()).strip()
+    await rate_limiter.enforce(subject=request_subject(request, user_id), rule=_MEMORY_WRITE_RATE_LIMIT)
+    content = _normalize_managed_content(body.content)
     if not content:
         raise HTTPException(status_code=400, detail="Memory content is required")
 
@@ -488,11 +552,13 @@ async def update_managed_memory(
 
 @router.delete("/memory/manage/{memory_id}", response_model=bool)
 async def delete_managed_memory(
+    request: Request,
     memory_id: str,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
 ):
     user_id = resolve_user_id(x_user_id=x_user_id, x_openwebui_user_id=x_openwebui_user_id)
+    await rate_limiter.enforce(subject=request_subject(request, user_id), rule=_MEMORY_WRITE_RATE_LIMIT)
 
     kind, raw_id = _split_managed_memory_id(memory_id)
     if kind == "memory":
@@ -507,10 +573,12 @@ async def delete_managed_memory(
 
 @router.delete("/memory/manage", response_model=bool)
 async def clear_managed_memory(
+    request: Request,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
 ):
     user_id = resolve_user_id(x_user_id=x_user_id, x_openwebui_user_id=x_openwebui_user_id)
+    await rate_limiter.enforce(subject=request_subject(request, user_id), rule=_MEMORY_WRITE_RATE_LIMIT)
     await profile_repo.save(UserProfile(user_id=user_id))
     await _memory_client().delete_all(user_id=user_id)
     return True
@@ -518,6 +586,7 @@ async def clear_managed_memory(
 
 @router.delete("/memory/{memory_id}")
 async def delete_memory(
+    request: Request,
     memory_id: str,
     x_user_id: str | None = Header(None, alias="X-User-Id"),
     x_openwebui_user_id: str | None = Header(None, alias="X-OpenWebUI-User-Id"),
@@ -525,5 +594,6 @@ async def delete_memory(
     if memory_id == "manage":
         raise HTTPException(status_code=404, detail="Use /memory/manage for managed memory operations")
     user_id = resolve_user_id(x_user_id=x_user_id, x_openwebui_user_id=x_openwebui_user_id)
+    await rate_limiter.enforce(subject=request_subject(request, user_id), rule=_MEMORY_WRITE_RATE_LIMIT)
     await _memory_client().delete(memory_id=memory_id, user_id=user_id)
     return {"deleted": memory_id}

@@ -9,11 +9,12 @@ from datetime import datetime
 from typing import Protocol
 
 from miniopy_async import Minio
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.resource_limits import MAX_USER_FILES, MAX_USER_STORAGE_BYTES, normalize_filename
 from app.storage.db import AsyncSessionLocal
 from app.storage.models import File, User
 
@@ -34,6 +35,10 @@ class StoredFileInfo:
     content_type: str
     size_bytes: int
     created_at: datetime
+
+
+class FileQuotaExceededError(RuntimeError):
+    pass
 
 
 class IFileStorage(Protocol):
@@ -92,23 +97,24 @@ class MinIOFileStorage:
         await self._ensure_bucket()
 
         file_id = str(uuid.uuid4())
-        object_key = f"{user_id}/{file_id}/{filename}"
+        safe_filename = normalize_filename(filename)
+        object_key = f"{user_id}/{file_id}/{safe_filename}"
         size = len(file_bytes)
-
-        await self._client.put_object(
-            self._bucket,
-            object_key,
-            io.BytesIO(file_bytes),
-            length=size,
-            content_type=content_type,
-        )
 
         async with AsyncSessionLocal() as session:
             db_user_id = await self._ensure_user_id(session, user_id)
+            await self._ensure_user_quota(session, db_user_id=db_user_id, incoming_size=size)
+            await self._client.put_object(
+                self._bucket,
+                object_key,
+                io.BytesIO(file_bytes),
+                length=size,
+                content_type=content_type,
+            )
             stmt = pg_insert(File).values(
                 id=uuid.UUID(file_id),
                 user_id=db_user_id,
-                filename=filename,
+                filename=safe_filename,
                 content_type=content_type,
                 size_bytes=size,
                 bucket=self._bucket,
@@ -135,6 +141,7 @@ class MinIOFileStorage:
                 select(File)
                 .where(File.user_id == db_user_id)
                 .order_by(File.created_at.desc())
+                .limit(MAX_USER_FILES)
             )
             rows = result.scalars().all()
 
@@ -223,6 +230,19 @@ class MinIOFileStorage:
     async def _get_user_id(self, session: AsyncSession, external_id: str) -> uuid.UUID | None:
         result = await session.execute(select(User.id).where(User.external_id == external_id))
         return result.scalar_one_or_none()
+
+    async def _ensure_user_quota(self, session: AsyncSession, *, db_user_id: uuid.UUID, incoming_size: int) -> None:
+        result = await session.execute(
+            select(
+                func.count(File.id),
+                func.coalesce(func.sum(File.size_bytes), 0),
+            ).where(File.user_id == db_user_id)
+        )
+        file_count, total_bytes = result.one()
+        if int(file_count or 0) >= MAX_USER_FILES:
+            raise FileQuotaExceededError("File limit reached. Delete old files before uploading new ones.")
+        if int(total_bytes or 0) + incoming_size > MAX_USER_STORAGE_BYTES:
+            raise FileQuotaExceededError("File storage quota reached. Delete old files before uploading new ones.")
 
     @staticmethod
     def _file_not_found(file_id: str, user_id: str) -> PermissionError:

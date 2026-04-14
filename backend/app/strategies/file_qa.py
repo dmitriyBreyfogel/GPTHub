@@ -10,6 +10,11 @@ from docx import Document
 from pypdf import PdfReader
 
 from app.core.prompt_cache import prompt_cache_manager
+from app.core.resource_limits import (
+    MAX_FILE_QA_CHUNKS,
+    MAX_FILE_QA_PDF_PAGES,
+    MAX_FILE_QA_SOURCE_CHARS,
+)
 from app.core.response_formatting import append_technical_formatting_guidance
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
@@ -27,6 +32,9 @@ class FileQAStrategy:
     chunk_size = 1800
     chunk_overlap = 250
     top_k = 5
+    max_source_chars = MAX_FILE_QA_SOURCE_CHARS
+    max_chunks = MAX_FILE_QA_CHUNKS
+    max_pdf_pages = MAX_FILE_QA_PDF_PAGES
 
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
         ranked_chunks = await self._rank_chunks(request)
@@ -99,33 +107,55 @@ class FileQAStrategy:
     def _extract_pdf(self, file_bytes: bytes) -> str:
         reader = PdfReader(BytesIO(file_bytes))
         parts = []
-        for page in reader.pages:
+        total_chars = 0
+        for page_index, page in enumerate(reader.pages):
+            if page_index >= self.max_pdf_pages:
+                break
             page_text = page.extract_text() or ""
-            if page_text.strip():
-                parts.append(page_text)
-        return self._normalize_text("\n\n".join(parts))
+            normalized = self._normalize_text(page_text)
+            if not normalized:
+                continue
+            remaining = self.max_source_chars - total_chars
+            if remaining <= 0:
+                break
+            clipped = normalized[:remaining].rstrip()
+            if clipped:
+                parts.append(clipped)
+                total_chars += len(clipped)
+        return "\n\n".join(parts).strip()
 
     def _extract_docx(self, file_bytes: bytes) -> str:
         document = Document(BytesIO(file_bytes))
         parts = []
+        total_chars = 0
         for paragraph in document.paragraphs:
-            text = paragraph.text.strip()
+            text = self._normalize_text(paragraph.text)
             if text:
-                parts.append(text)
+                total_chars = self._append_limited_text(parts, text, total_chars)
+                if total_chars >= self.max_source_chars:
+                    break
         for table in document.tables:
+            if total_chars >= self.max_source_chars:
+                break
             for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                cells = []
+                for cell in row.cells:
+                    cell_text = self._normalize_text(cell.text)
+                    if cell_text:
+                        cells.append(cell_text)
                 if cells:
-                    parts.append(" | ".join(cells))
-        return self._normalize_text("\n".join(parts))
+                    total_chars = self._append_limited_text(parts, " | ".join(cells), total_chars)
+                    if total_chars >= self.max_source_chars:
+                        break
+        return "\n".join(parts).strip()
 
     def _extract_plain_text(self, file_bytes: bytes) -> str:
         for encoding in ("utf-8", "utf-8-sig", "cp1251"):
             try:
-                return self._normalize_text(file_bytes.decode(encoding))
+                return self._normalize_text(file_bytes.decode(encoding))[: self.max_source_chars].rstrip()
             except UnicodeDecodeError:
                 continue
-        return self._normalize_text(file_bytes.decode("utf-8", errors="ignore"))
+        return self._normalize_text(file_bytes.decode("utf-8", errors="ignore"))[: self.max_source_chars].rstrip()
 
     def _chunk_text(self, text: str) -> list[str]:
         normalized = self._normalize_text(text)
@@ -139,10 +169,22 @@ class FileQAStrategy:
             chunk = normalized[start:split_at].strip()
             if chunk:
                 chunks.append(chunk)
+            if len(chunks) >= self.max_chunks:
+                break
             if split_at >= len(normalized):
                 break
             start = max(0, split_at - self.chunk_overlap)
         return chunks
+
+    def _append_limited_text(self, parts: list[str], text: str, total_chars: int) -> int:
+        remaining = self.max_source_chars - total_chars
+        if remaining <= 0:
+            return total_chars
+        clipped = text[:remaining].rstrip()
+        if not clipped:
+            return total_chars
+        parts.append(clipped)
+        return total_chars + len(clipped)
 
     def _split_position(self, text: str, start: int, end: int) -> int:
         if end >= len(text):

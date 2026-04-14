@@ -20,7 +20,7 @@ from pptx import Presentation
 from app.api.v1 import files as files_module
 from app.core.config import settings
 from app.core.prompt_cache import prompt_cache_manager
-from app.storage.files import StoredFile, build_file_access_token
+from app.storage.files import FileQuotaExceededError, StoredFile, build_file_access_token
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 from app.strategies.audio import AudioStrategy
 from app.strategies.image_gen import ImageGenStrategy
@@ -602,6 +602,24 @@ class ResponseMetadataTests(unittest.TestCase):
 
 
 class FileDownloadRouteTests(unittest.TestCase):
+    def test_upload_returns_429_when_file_quota_is_exhausted(self) -> None:
+        app = FastAPI()
+        app.include_router(files_module.router, prefix="/v1")
+
+        class _QuotaStorage:
+            async def upload(self, **kwargs):
+                raise FileQuotaExceededError("quota reached")
+
+        with patch.object(files_module, "file_storage", _QuotaStorage()):
+            response = TestClient(app).post(
+                "/v1/files",
+                headers={"x-user-id": "user-1"},
+                files={"file": ("deck.pptx", b"x", "application/octet-stream")},
+            )
+
+        self.assertEqual(429, response.status_code)
+        self.assertEqual("quota reached", response.json()["detail"])
+
     def test_download_uses_anonymous_user_when_header_is_missing(self) -> None:
         app = FastAPI()
         app.include_router(files_module.router, prefix="/v1")

@@ -13,6 +13,7 @@ from app.api.v1.memory import router as memory_router
 from app.api.v1.models import router as models_router
 from app.api.v1.tasks import router as tasks_router
 from app.api.v1.workspaces import router as workspaces_router
+from app.core.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.storage.db import engine, Base
 
 
@@ -55,6 +56,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(BodySizeLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(health_router)
 app.include_router(chat_router, prefix="/v1")

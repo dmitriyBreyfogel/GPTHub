@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+from fastapi import HTTPException
+
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -201,6 +203,24 @@ class RequestFileParsingTests(unittest.IsolatedAsyncioTestCase):
             ],
             [call.kwargs for call in storage.download.await_args_list],
         )
+
+    async def test_oversized_inline_base64_file_is_rejected(self) -> None:
+        encoded = base64.b64encode(b"123456789").decode("ascii")
+        body = {
+            "metadata": {
+                "file": {
+                    "filename": "notes.txt",
+                    "content_type": "text/plain",
+                    "base64": encoded,
+                }
+            }
+        }
+
+        with patch("app.api.v1.chat_support.files.MAX_INLINE_FILE_BYTES", 4):
+            with self.assertRaises(HTTPException) as ctx:
+                await request_file(body, user_id="user-1")
+
+        self.assertEqual(413, ctx.exception.status_code)
 
 
 if __name__ == "__main__":
