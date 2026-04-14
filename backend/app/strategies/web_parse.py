@@ -8,6 +8,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.core.prompt_cache import prompt_cache_manager
+from app.core.response_formatting import append_technical_formatting_guidance
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
@@ -110,7 +111,9 @@ class WebParseStrategy:
         return [
             ChatMessage(
                 role="system",
-                content=prompt_cache_manager.build_web_parse_system_prompt(),
+                content=append_technical_formatting_guidance(
+                    prompt_cache_manager.build_web_parse_system_prompt()
+                ),
             ),
             ChatMessage(role="user", content=user_content),
         ]

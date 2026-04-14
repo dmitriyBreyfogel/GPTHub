@@ -6,6 +6,7 @@ import re
 from typing import AsyncIterator
 
 from app.core.prompt_cache import prompt_cache_manager
+from app.core.response_formatting import append_technical_formatting_guidance
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.providers.search.base import SearchProvider, SearchResult
 from app.providers.search.duckduckgo import DuckDuckGoSearch
@@ -168,7 +169,9 @@ class SearchStrategy:
         return [
             ChatMessage(
                 role="system",
-                content=prompt_cache_manager.build_search_system_prompt(profile_text=profile_text),
+                content=append_technical_formatting_guidance(
+                    prompt_cache_manager.build_search_system_prompt(profile_text=profile_text)
+                ),
             ),
             ChatMessage(
                 role="user",

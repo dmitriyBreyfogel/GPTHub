@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from app.core.config import settings
 from app.core.prompt_cache import prompt_cache_manager
+from app.core.response_formatting import append_technical_formatting_guidance
 from app.providers.mws_gpt import ChatMessage, mws_client
 from app.providers.search.base import SearchProvider, SearchResult
 from app.providers.search.duckduckgo import DuckDuckGoSearch
@@ -194,6 +195,7 @@ class DeepResearchStrategy:
             state["query"],
             state.get("plan_steps") or [],
             ranked_documents,
+            state.get("profile_text", ""),
         )
         response = await mws_client.chat(
             messages,
@@ -293,14 +295,17 @@ class DeepResearchStrategy:
         resolved_query: str,
         plan_steps: list[str],
         ranked_documents: list[RankedDocument],
+        profile_text: str,
     ) -> list[ChatMessage]:
         plan_context = "\n".join(f"- {step}" for step in plan_steps) or "- Analyze the topic from the collected sources."
         source_context = build_source_context(ranked_documents, self.context_limit)
         return [
             ChatMessage(
                 role="system",
-                content=prompt_cache_manager.build_research_synthesis_system_prompt(
-                    profile_text=state.get("profile_text", ""),
+                content=append_technical_formatting_guidance(
+                    prompt_cache_manager.build_research_synthesis_system_prompt(
+                        profile_text=profile_text,
+                    )
                 ),
             ),
             ChatMessage(
