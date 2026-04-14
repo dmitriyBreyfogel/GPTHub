@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.api.v1.chat_support.contracts import RequestFile
 from app.core.classifier import TaskClassification, TaskClassifier
 from app.core.config import settings
 from app.core.file_types import has_image_input, task_type_from_file
@@ -73,8 +74,14 @@ class ModelRouter:
         task_type_override: str | None = None,
         file_content_type: str | None = None,
         file_name: str | None = None,
+        request_files: list[RequestFile] | None = None,
         context_messages: list[dict] | None = None,
     ) -> RoutingDecision:
+        routed_file = self._routing_request_file(
+            request_files=request_files,
+            file_content_type=file_content_type,
+            file_name=file_name,
+        )
         normalized_task_type_override = self._parse_task_type(task_type_override)
         normalized_model_override = self._normalize_model_override(model_override)
 
@@ -88,15 +95,15 @@ class ModelRouter:
             return await self._manual_model_decision(
                 text=text,
                 model=normalized_model_override,
-                file_content_type=file_content_type,
-                file_name=file_name,
+                file_content_type=routed_file.file_content_type,
+                file_name=routed_file.file_name,
                 context_messages=context_messages,
             )
 
         return await self._auto_decision(
             text,
-            file_content_type=file_content_type,
-            file_name=file_name,
+            file_content_type=routed_file.file_content_type,
+            file_name=routed_file.file_name,
             context_messages=context_messages,
         )
 
@@ -107,6 +114,7 @@ class ModelRouter:
             model_override=request.model_override,
             file_content_type=request.file_content_type,
             file_name=request.file_name,
+            request_files=request.request_files,
             context_messages=request.context_messages,
         )
         if decision.strategy is None:
@@ -119,11 +127,14 @@ class ModelRouter:
             file_bytes=request.file_bytes,
             file_name=request.file_name,
             file_content_type=request.file_content_type,
+            file_url=request.file_url,
             context_messages=request.context_messages,
             generation_options=request.generation_options,
             workspace_id=request.workspace_id,
             workspace_instructions=request.workspace_instructions,
             memory_context=request.memory_context,
+            request_files=request.request_files,
+            routing_models=request.routing_models,
         )
         response = await decision.strategy.execute(routed_request)
         return self.enrich_response(decision, response)
@@ -290,6 +301,33 @@ class ModelRouter:
             return TaskType(raw_task_type.strip())
         except Exception:
             return None
+
+    def _routing_request_file(
+        self,
+        *,
+        request_files: list[RequestFile] | None,
+        file_content_type: str | None,
+        file_name: str | None,
+    ) -> RequestFile:
+        if request_files:
+            prioritized_task_types = (
+                TaskType.IMAGE_ANALYSIS,
+                TaskType.AUDIO,
+                TaskType.FILE_QA,
+            )
+            for prioritized_task_type in prioritized_task_types:
+                for request_file in request_files:
+                    if task_type_from_file(
+                        file_content_type=request_file.file_content_type,
+                        file_name=request_file.file_name,
+                    ) == prioritized_task_type:
+                        return request_file
+            return request_files[0]
+
+        return RequestFile(
+            file_content_type=file_content_type,
+            file_name=file_name,
+        )
 
     def _task_type_for_model(
         self,

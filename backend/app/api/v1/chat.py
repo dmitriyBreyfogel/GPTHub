@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.v1.chat_support.errors import exception_detail
-from app.api.v1.chat_support.files import request_file as resolve_request_file
+from app.api.v1.chat_support.files import request_files as resolve_request_files
 from app.api.v1.chat_support.memory_support import (
     build_memory_context,
     persist_memory,
@@ -41,7 +41,7 @@ async def chat_completions(
     )
     user_text = last_user_text(body)
     memory_enabled = request_memory_enabled(body)
-    request_file = await resolve_request_file(body, user_id)
+    request_files = await resolve_request_files(body, user_id)
     request_workspace = await resolve_request_workspace(body, user_id, request.headers.get("x-workspace-id"))
     memory_context = await build_memory_context(user_id, user_text, memory_enabled)
 
@@ -50,8 +50,7 @@ async def chat_completions(
         user_id=user_id,
         model_override=body.get("model") or request_workspace.model,
         task_type_override=task_type_override(body),
-        file_content_type=request_file.file_content_type,
-        file_name=request_file.file_name,
+        request_files=request_files,
         context_messages=body.get("messages") if isinstance(body.get("messages"), list) else None,
     )
     body["model"] = decision.model
@@ -62,7 +61,7 @@ async def chat_completions(
         decision,
         user_id,
         user_text,
-        request_file,
+        request_files,
         request_workspace,
         memory_context,
     )

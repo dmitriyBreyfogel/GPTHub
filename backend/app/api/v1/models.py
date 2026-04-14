@@ -2,35 +2,45 @@ import time
 
 from fastapi import APIRouter
 from app.core.config import settings
+from app.core.model_metadata import enrich_model_list_payload
 import httpx
 
 router = APIRouter()
 
-_FALLBACK_MODELS = [
-    "gpt-4o-mini",
-    "gpt-4o",
-    "cotype-pro",
-    "cotype-plus-32k",
-    "cotype-pro-vl-32b",
-    "kodify-2.0",
-    "qwen2.5-vl",
-    "qwen2.5-vl-72b",
-    "qwen3-vl-30b-a3b-instruct",
-    "whisper-turbo-local-preview",
-    "sd3.5-large-image",
-    "sdxl-lightning-image",
-    "bge-m3",
-]
+
+def _fallback_model_ids() -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+
+    for model_id in [
+        settings.default_text_model,
+        settings.fallback_text_model,
+        settings.vision_model,
+        settings.vision_fallback_model,
+        settings.asr_model,
+        settings.image_generation_model,
+        settings.image_generation_fallback_model,
+        settings.embedding_model,
+        settings.tts_model,
+    ]:
+        normalized = str(model_id or "").strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            ordered.append(normalized)
+
+    return ordered
 
 
 def _fallback_response() -> dict:
-    return {
+    return enrich_model_list_payload(
+        {
         "object": "list",
         "data": [
             {"id": m, "object": "model", "created": int(time.time()), "owned_by": "mws"}
-            for m in _FALLBACK_MODELS
+            for m in _fallback_model_ids()
         ],
-    }
+        }
+    )
 
 
 @router.get("/models")
@@ -42,6 +52,6 @@ async def list_models():
                 headers={"Authorization": f"Bearer {settings.mws_gpt_api_key}"},
             )
             resp.raise_for_status()
-            return resp.json()
+            return enrich_model_list_payload(resp.json())
     except Exception:
         return _fallback_response()

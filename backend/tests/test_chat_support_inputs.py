@@ -11,7 +11,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.api.v1.chat_support.files import request_file
+from app.api.v1.chat_support.files import request_file, request_files
 from app.api.v1.chat_support.parsing import (
     content_to_text,
     last_user_text,
@@ -111,6 +111,7 @@ class RequestFileParsingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(file.file_bytes)
         self.assertEqual("image/url", file.file_content_type)
+        self.assertEqual("https://example.com/image.png", file.file_url)
 
     async def test_metadata_base64_file_is_decoded_with_filename_and_mime(self) -> None:
         encoded = base64.b64encode(b"plain text").decode("ascii")
@@ -149,6 +150,57 @@ class RequestFileParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(file.file_bytes)
         self.assertIsNone(file.file_name)
         self.assertIsNone(file.file_content_type)
+
+    async def test_request_files_collects_multiple_inline_media_items(self) -> None:
+        encoded_image = base64.b64encode(b"image-bytes").decode("ascii")
+        encoded_audio = base64.b64encode(b"audio-bytes").decode("ascii")
+        body = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "analyze"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded_image}"}},
+                        {"type": "input_audio", "input_audio": {"data": encoded_audio, "format": "wav"}},
+                    ],
+                }
+            ]
+        }
+
+        files = await request_files(body, user_id="user-1")
+
+        self.assertEqual(2, len(files))
+        self.assertEqual("image/png", files[0].file_content_type)
+        self.assertEqual("audio/wav", files[1].file_content_type)
+
+    async def test_request_files_downloads_multiple_metadata_files(self) -> None:
+        body = {
+            "metadata": {
+                "files": [
+                    {"file_id": "image-1", "filename": "image.png", "content_type": "image/png"},
+                    {"file_id": "audio-1", "filename": "note.wav", "content_type": "audio/wav"},
+                ]
+            }
+        }
+        storage = Mock()
+        storage.download = AsyncMock(
+            side_effect=[
+                (b"image-bytes", "image/png"),
+                (b"audio-bytes", "audio/wav"),
+            ]
+        )
+
+        with patch("app.api.v1.chat_support.files.file_storage", storage):
+            files = await request_files(body, user_id="user-1")
+
+        self.assertEqual(2, len(files))
+        self.assertEqual(
+            [
+                {"file_id": "image-1", "user_id": "user-1"},
+                {"file_id": "audio-1", "user_id": "user-1"},
+            ],
+            [call.kwargs for call in storage.download.await_args_list],
+        )
 
 
 if __name__ == "__main__":

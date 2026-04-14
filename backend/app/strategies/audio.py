@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator
 
+from app.api.v1.chat_support.contracts import RequestFile
 from app.core.config import settings
+from app.core.file_types import has_audio_input
 from app.providers.mws_gpt import mws_client
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 from app.strategies.response_utils import stream_chunk
@@ -24,11 +26,12 @@ class AudioStrategy:
         transcript = await self._transcribe(request)
         text_request = self._text_request(request, transcript)
         response = await self._text_strategy.execute(text_request)
+        transcription_model = request.model_override or settings.asr_model
         return StrategyResponse(
             content=response.content,
             model_used=response.model_used,
             task_type=self.task_type,
-            routing_reason=f"Audio strategy: аудио расшифровано моделью {settings.asr_model}, транскрипт передан в TextStrategy.",
+            routing_reason=f"Audio strategy: audio was transcribed with {transcription_model}, then forwarded to TextStrategy.",
         )
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
@@ -59,9 +62,7 @@ class AudioStrategy:
                     content=response.content,
                     model_used=response.model_used,
                     task_type=self.task_type,
-                    routing_reason=(
-                        "Audio strategy: text streaming fallback after audio transcription."
-                    ),
+                    routing_reason="Audio strategy: text streaming fallback after audio transcription.",
                 )
                 for start in range(0, len(audio_response.content), AUDIO_STREAM_CHUNK_SIZE):
                     yield stream_chunk(
@@ -78,14 +79,26 @@ class AudioStrategy:
             raise
 
     async def _transcribe(self, request: StrategyRequest) -> str:
-        if not request.file_bytes:
+        audio_files = self._audio_files(request)
+        if not audio_files:
             raise ValueError("Audio bytes are required for audio strategy")
-        return await mws_client.transcribe(
-            request.file_bytes,
-            filename=request.file_name or "audio.wav",
-            content_type=request.file_content_type or "audio/wav",
-            model=settings.asr_model,
-        )
+
+        transcription_model = request.model_override or settings.asr_model
+        transcripts: list[str] = []
+
+        for index, audio_file in enumerate(audio_files, start=1):
+            transcript = await mws_client.transcribe(
+                audio_file.file_bytes or b"",
+                filename=audio_file.file_name or f"audio-{index}.wav",
+                content_type=audio_file.file_content_type or "audio/wav",
+                model=transcription_model,
+            )
+            if len(audio_files) == 1:
+                transcripts.append(transcript)
+            else:
+                transcripts.append(f"[{audio_file.file_name or f'audio-{index}'}]\n{transcript}")
+
+        return "\n\n".join(transcripts)
 
     def _heartbeat_chunk(self, request: StrategyRequest) -> bytes:
         return stream_chunk(
@@ -100,20 +113,51 @@ class AudioStrategy:
 
     def _text_request(self, request: StrategyRequest, transcript: str) -> StrategyRequest:
         if request.text.strip():
-            text = f"{request.text.strip()}\n\nТранскрипт аудио:\n{transcript}"
+            text = f"{request.text.strip()}\n\nAudio transcript:\n{transcript}"
         else:
-            text = f"Проанализируй аудиозапись.\n\nТранскрипт аудио:\n{transcript}"
+            text = f"Analyze the attached audio.\n\nAudio transcript:\n{transcript}"
         return StrategyRequest(
             task_type=TaskType.TEXT,
             text=text,
             user_id=request.user_id,
-            model_override=settings.default_text_model,
+            model_override=(request.routing_models or {}).get("text") or settings.default_text_model,
             context_messages=self._text_context_messages(request, text),
             generation_options=request.generation_options,
             workspace_id=request.workspace_id,
             workspace_instructions=request.workspace_instructions,
             memory_context=request.memory_context,
+            request_files=request.request_files,
+            routing_models=request.routing_models,
         )
+
+    def _audio_files(self, request: StrategyRequest) -> list[RequestFile]:
+        request_files = request.request_files or []
+        audio_files = [
+            file
+            for file in request_files
+            if file.file_bytes
+            and has_audio_input(
+                file_content_type=file.file_content_type,
+                file_name=file.file_name,
+            )
+        ]
+        if audio_files:
+            return audio_files
+
+        if request.file_bytes and has_audio_input(
+            file_content_type=request.file_content_type,
+            file_name=request.file_name,
+        ):
+            return [
+                RequestFile(
+                    file_bytes=request.file_bytes,
+                    file_name=request.file_name,
+                    file_content_type=request.file_content_type,
+                    file_url=request.file_url,
+                )
+            ]
+
+        return []
 
     def _text_context_messages(self, request: StrategyRequest, text: str) -> list[dict] | None:
         context_messages = request.context_messages or []

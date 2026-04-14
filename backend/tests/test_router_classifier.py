@@ -13,6 +13,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.core.classifier import TaskClassification, TaskClassifier
 from app.core.config import settings
 from app.core.router import ModelRouter
+from app.api.v1.chat_support.contracts import RequestFile
 from app.providers.mws_gpt import ChatResponse
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
 
@@ -355,6 +356,31 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(context_messages, classifier.calls[0]["context_messages"])
+
+    async def test_route_uses_prioritized_request_file_from_multimodal_bundle(self) -> None:
+        classifier = _RecordingClassifier(_classification(TaskType.IMAGE_ANALYSIS))
+        router = ModelRouter(classifier=classifier)
+
+        await router.route(
+            "what is shown here?",
+            user_id="user-1",
+            model_override="auto",
+            request_files=[
+                RequestFile(
+                    file_bytes=b"audio",
+                    file_name="note.wav",
+                    file_content_type="audio/wav",
+                ),
+                RequestFile(
+                    file_bytes=b"image",
+                    file_name="photo.png",
+                    file_content_type="image/png",
+                ),
+            ],
+        )
+
+        self.assertEqual("image/png", classifier.calls[0]["file_content_type"])
+        self.assertEqual("photo.png", classifier.calls[0]["file_name"])
 
     async def test_all_auto_aliases_use_classifier(self) -> None:
         for alias in (None, "auto", "gpthub-auto", "gpthub_auto", "automatic"):

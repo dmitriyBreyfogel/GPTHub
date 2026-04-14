@@ -168,13 +168,15 @@ class ChatCompletionsFlowTests(unittest.TestCase):
             patch.object(chat_module, "model_router", fake_router),
             patch.object(
                 chat_module,
-                "resolve_request_file",
+                "resolve_request_files",
                 new=AsyncMock(
-                    return_value=RequestFile(
-                        file_bytes=b"file-bytes",
-                        file_name="brief.pdf",
-                        file_content_type="application/pdf",
-                    )
+                    return_value=[
+                        RequestFile(
+                            file_bytes=b"file-bytes",
+                            file_name="brief.pdf",
+                            file_content_type="application/pdf",
+                        )
+                    ]
                 ),
             ),
             patch.object(
@@ -210,8 +212,9 @@ class ChatCompletionsFlowTests(unittest.TestCase):
         self.assertEqual("user-123", route_call["user_id"])
         self.assertIsNone(route_call["model_override"])
         self.assertIsNone(route_call["task_type_override"])
-        self.assertEqual("application/pdf", route_call["file_content_type"])
-        self.assertEqual("brief.pdf", route_call["file_name"])
+        self.assertEqual(1, len(route_call["request_files"]))
+        self.assertEqual("application/pdf", route_call["request_files"][0].file_content_type)
+        self.assertEqual("brief.pdf", route_call["request_files"][0].file_name)
 
         strategy_request = strategy.execute_requests[0]
         self.assertEqual(TaskType.SEARCH, strategy_request.task_type)
@@ -241,7 +244,7 @@ class ChatCompletionsFlowTests(unittest.TestCase):
 
         with (
             patch.object(chat_module, "model_router", fake_router),
-            patch.object(chat_module, "resolve_request_file", new=AsyncMock(return_value=RequestFile())),
+            patch.object(chat_module, "resolve_request_files", new=AsyncMock(return_value=[])),
             patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
         ):
             response = _test_client().post(
@@ -277,7 +280,7 @@ class ChatCompletionsFlowTests(unittest.TestCase):
 
         with (
             patch.object(chat_module, "model_router", fake_router),
-            patch.object(chat_module, "resolve_request_file", new=AsyncMock(return_value=RequestFile())),
+            patch.object(chat_module, "resolve_request_files", new=AsyncMock(return_value=[])),
             patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
         ):
             response = _test_client().post(
@@ -304,7 +307,7 @@ class ChatCompletionsFlowTests(unittest.TestCase):
 
         with (
             patch.object(chat_module, "model_router", fake_router),
-            patch.object(chat_module, "resolve_request_file", new=AsyncMock(return_value=RequestFile())),
+            patch.object(chat_module, "resolve_request_files", new=AsyncMock(return_value=[])),
             patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
         ):
             response = _test_client().post(
@@ -331,8 +334,8 @@ class ChatCompletionsFlowTests(unittest.TestCase):
             patch.object(chat_module, "model_router", fake_router),
             patch.object(
                 chat_module,
-                "resolve_request_file",
-                new=AsyncMock(return_value=RequestFile(file_content_type="image/url")),
+                "resolve_request_files",
+                new=AsyncMock(return_value=[RequestFile(file_content_type="image/url")]),
             ),
             patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
         ):
@@ -354,7 +357,7 @@ class ChatCompletionsFlowTests(unittest.TestCase):
 
         self.assertEqual(200, response.status_code)
         self.assertEqual("Что на изображении?", fake_router.route_calls[0]["text"])
-        self.assertEqual("image/url", fake_router.route_calls[0]["file_content_type"])
+        self.assertEqual("image/url", fake_router.route_calls[0]["request_files"][0].file_content_type)
 
     def test_workspace_model_is_used_as_model_override_when_body_model_is_missing(self) -> None:
         strategy = _FakeStrategy(TaskType.TEXT)
@@ -370,7 +373,7 @@ class ChatCompletionsFlowTests(unittest.TestCase):
 
         with (
             patch.object(chat_module, "model_router", fake_router),
-            patch.object(chat_module, "resolve_request_file", new=AsyncMock(return_value=RequestFile())),
+            patch.object(chat_module, "resolve_request_files", new=AsyncMock(return_value=[])),
             patch.object(
                 chat_module,
                 "resolve_request_workspace",
@@ -395,7 +398,7 @@ class ChatCompletionsFlowTests(unittest.TestCase):
 
         with (
             patch.object(chat_module, "model_router", fake_router),
-            patch.object(chat_module, "resolve_request_file", new=AsyncMock(return_value=RequestFile())),
+            patch.object(chat_module, "resolve_request_files", new=AsyncMock(return_value=[])),
             patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
         ):
             response = _test_client().post(
@@ -424,7 +427,7 @@ class ChatCompletionsFlowTests(unittest.TestCase):
 
         with (
             patch.object(chat_module, "model_router", fake_router),
-            patch.object(chat_module, "resolve_request_file", new=AsyncMock(return_value=RequestFile())),
+            patch.object(chat_module, "resolve_request_files", new=AsyncMock(return_value=[])),
             patch.object(chat_module, "resolve_request_workspace", new=AsyncMock(return_value=RequestWorkspace())),
             patch.object(chat_module.httpx, "AsyncClient", _FakeAsyncClient),
         ):

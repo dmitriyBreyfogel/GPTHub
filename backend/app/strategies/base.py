@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import AsyncIterator, Protocol, runtime_checkable
 
 from app.memory.context import MemoryContext
+from app.api.v1.chat_support.contracts import RequestFile
 
 
 class TaskType(StrEnum):
@@ -29,11 +30,14 @@ class StrategyRequest:
     file_bytes: bytes | None = None
     file_name: str | None = None
     file_content_type: str | None = None
+    file_url: str | None = None
     context_messages: list[dict] | None = None
     generation_options: dict | None = None
     workspace_id: str | None = None
     workspace_instructions: str = ""
     memory_context: MemoryContext | None = None
+    request_files: list[RequestFile] | None = None
+    routing_models: dict[str, str] | None = None
 
 
 @dataclass

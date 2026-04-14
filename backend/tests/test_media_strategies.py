@@ -26,6 +26,7 @@ from app.strategies.audio import AudioStrategy
 from app.strategies.image_gen import ImageGenStrategy
 from app.strategies.presentation import PresentationStrategy, SlideSpec
 from app.strategies.response_utils import stream_chunk
+from app.strategies.vision import VisionStrategy
 
 
 class _FakeImageClient:
@@ -156,6 +157,115 @@ class AudioStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({}, first_payload["choices"][0]["delta"])
         self.assertIn("audio answer", b"".join(chunks).decode("utf-8"))
         self.assertEqual(b"data: [DONE]\n\n", chunks[-1])
+
+    async def test_execute_uses_routing_text_model_for_final_synthesis(self) -> None:
+        strategy = AudioStrategy()
+        request = StrategyRequest(
+            task_type=TaskType.AUDIO,
+            text="summarize",
+            user_id="user-1",
+            model_override="custom-audio-model",
+            request_files=[
+                type("AudioFile", (), {
+                    "file_bytes": b"audio-bytes",
+                    "file_name": "song.wav",
+                    "file_content_type": "audio/wav",
+                    "file_url": None,
+                })()
+            ],
+            routing_models={"text": "custom-text-model"},
+        )
+
+        with (
+            patch("app.strategies.audio.mws_client.transcribe", new=AsyncMock(return_value="hello world")) as transcribe,
+            patch.object(strategy._text_strategy, "execute", new=AsyncMock(return_value=StrategyResponse(
+                content="done",
+                model_used="custom-text-model",
+                task_type=TaskType.TEXT,
+                routing_reason="text",
+            ))) as text_execute,
+        ):
+            response = await strategy.execute(request)
+
+        self.assertEqual("done", response.content)
+        self.assertEqual("custom-text-model", response.model_used)
+        transcribe.assert_awaited_once()
+        forwarded_request = text_execute.await_args.args[0]
+        self.assertEqual("custom-text-model", forwarded_request.model_override)
+
+    async def test_transcribe_concatenates_multiple_audio_attachments(self) -> None:
+        strategy = AudioStrategy()
+        request = StrategyRequest(
+            task_type=TaskType.AUDIO,
+            text="analyze",
+            user_id="user-1",
+            model_override="custom-audio-model",
+            request_files=[
+                type("AudioFile", (), {
+                    "file_bytes": b"one",
+                    "file_name": "one.wav",
+                    "file_content_type": "audio/wav",
+                    "file_url": None,
+                })(),
+                type("AudioFile", (), {
+                    "file_bytes": b"two",
+                    "file_name": "two.wav",
+                    "file_content_type": "audio/wav",
+                    "file_url": None,
+                })(),
+            ],
+        )
+
+        with patch("app.strategies.audio.mws_client.transcribe", new=AsyncMock(side_effect=["first", "second"])) as transcribe:
+            transcript = await strategy._transcribe(request)
+
+        self.assertIn("[one.wav]", transcript)
+        self.assertIn("[two.wav]", transcript)
+        self.assertEqual(2, transcribe.await_count)
+
+
+class VisionStrategyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_build_messages_includes_multiple_images_and_audio_context(self) -> None:
+        strategy = VisionStrategy()
+        request = StrategyRequest(
+            task_type=TaskType.IMAGE_ANALYSIS,
+            text="compare the images",
+            user_id="user-1",
+            model_override="custom-vision-model",
+            request_files=[
+                type("ImageFile", (), {
+                    "file_bytes": b"image-one",
+                    "file_name": "one.png",
+                    "file_content_type": "image/png",
+                    "file_url": None,
+                })(),
+                type("ImageFile", (), {
+                    "file_bytes": b"image-two",
+                    "file_name": "two.png",
+                    "file_content_type": "image/png",
+                    "file_url": None,
+                })(),
+                type("AudioFile", (), {
+                    "file_bytes": b"audio",
+                    "file_name": "note.wav",
+                    "file_content_type": "audio/wav",
+                    "file_url": None,
+                })(),
+            ],
+            context_messages=[{"role": "user", "content": "compare the images"}],
+        )
+
+        with patch("app.strategies.vision.mws_client.transcribe", new=AsyncMock(return_value="spoken hint")):
+            messages = await strategy._build_messages(request)
+
+        self.assertEqual("system", messages[0].role)
+        self.assertEqual("user", messages[1].role)
+        content = messages[1].content
+        self.assertIsInstance(content, list)
+        image_parts = [item for item in content if item.get("type") == "image_url"]
+        self.assertEqual(2, len(image_parts))
+        text_parts = [item for item in content if item.get("type") == "text"]
+        self.assertTrue(any("spoken hint" in item.get("text", "") for item in text_parts))
 
 
 class ImageGenerationStrategyTests(unittest.IsolatedAsyncioTestCase):

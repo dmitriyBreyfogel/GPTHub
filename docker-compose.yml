@@ -165,6 +165,7 @@ services:
         OPENWEBUI_GIT_REF: ${OPENWEBUI_GIT_REF}
         OPENWEBUI_BASE_IMAGE: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
         VITE_GPTHUB_VISION_MODELS: ${VISION_MODEL},${VISION_FALLBACK_MODEL}
+        VITE_GPTHUB_AUDIO_MODELS: ${ASR_MODEL}
     image: gpthub-openwebui:local
     environment:
       OPENAI_API_BASE_URL: ${OPENWEBUI_API_BASE_URL}
