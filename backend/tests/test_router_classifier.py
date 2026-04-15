@@ -202,6 +202,16 @@ class TaskClassifierTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(TaskType.RUNTIME, result.task_type)
         self.assertEqual("runtime", result.method)
 
+    async def test_casual_dialogue_routes_to_text_before_search_layers(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))
+        classifier._classify_llm = AsyncMock(side_effect=AssertionError("llm must not run"))
+
+        result = await classifier.classify("как у тебя настроение?")
+
+        self.assertEqual(TaskType.TEXT, result.task_type)
+        self.assertEqual("casual_dialogue", result.method)
+
     async def test_follow_up_after_sourced_answer_routes_to_search(self) -> None:
         classifier = TaskClassifier()
         classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))

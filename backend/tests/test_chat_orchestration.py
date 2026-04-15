@@ -58,6 +58,66 @@ def _decision(task_type: TaskType, model: str, strategy: _FakeStrategy | None = 
 
 
 class ChatOrchestrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_casual_dialogue_in_custom_mode_bypasses_planner_and_stays_text(self) -> None:
+        body = {
+            "model": "qwen2.5-72b-instruct",
+            "messages": [{"role": "user", "content": "мне грустно"}],
+            "metadata": {
+                "gpthub_model_mode": "custom",
+                "gpthub_routing_models": {
+                    "text": "qwen2.5-72b-instruct",
+                    "image": "qwen-image-lightning",
+                    "audio": "whisper-turbo-local",
+                },
+            },
+        }
+
+        with patch(
+            "app.api.v1.chat_support.orchestration._resolve_planned_request",
+            new=AsyncMock(side_effect=AssertionError("planner must not run")),
+        ):
+            plan = await build_chat_execution_plan(
+                body,
+                user_id="user-1",
+                user_text="мне грустно",
+                requested_task_type=None,
+                request_files=[],
+                request_workspace=RequestWorkspace(),
+                memory_context=MemoryContext.disabled("user-1"),
+            )
+
+        self.assertEqual("qwen2.5-72b-instruct", plan.model_override)
+        self.assertEqual("text", plan.task_type_override)
+        self.assertIsNone(plan.direct_response)
+
+    async def test_dialog_history_first_user_message_returns_direct_response(self) -> None:
+        body = {
+            "messages": [
+                {"role": "user", "content": "\u041f\u0440\u0438\u0432\u0435\u0442!"},
+                {"role": "assistant", "content": "\u041f\u0440\u0438\u0432\u0435\u0442."},
+                {"role": "user", "content": "\u0420\u0430\u0441\u0441\u043a\u0430\u0436\u0438 \u043f\u0440\u043e Python."},
+                {"role": "assistant", "content": "Python is a programming language."},
+                {"role": "user", "content": "\u041a\u0430\u043a\u043e\u0439 \u043c\u043e\u0439 \u043f\u0435\u0440\u0432\u044b\u0439 \u0437\u0430\u043f\u0440\u043e\u0441 \u0431\u044b\u043b? \u041f\u0440\u043e\u0446\u0438\u0442\u0438\u0440\u0443\u0439."},
+            ],
+        }
+
+        plan = await build_chat_execution_plan(
+            body,
+            user_id="user-1",
+            user_text="\u041a\u0430\u043a\u043e\u0439 \u043c\u043e\u0439 \u043f\u0435\u0440\u0432\u044b\u0439 \u0437\u0430\u043f\u0440\u043e\u0441 \u0431\u044b\u043b? \u041f\u0440\u043e\u0446\u0438\u0442\u0438\u0440\u0443\u0439.",
+            requested_task_type=None,
+            request_files=[],
+            request_workspace=RequestWorkspace(),
+            memory_context=MemoryContext.disabled("user-1"),
+        )
+
+        self.assertIsNotNone(plan.direct_response)
+        self.assertIsNotNone(plan.direct_decision)
+        self.assertEqual(TaskType.TEXT, plan.direct_decision.task_type)
+        self.assertEqual("dialog_context", plan.direct_decision.method)
+        self.assertIn("\u0412\u0430\u0448 \u043f\u0435\u0440\u0432\u044b\u0439 \u0437\u0430\u043f\u0440\u043e\u0441", plan.direct_response.content)
+        self.assertIn("> \u041f\u0440\u0438\u0432\u0435\u0442!", plan.direct_response.content)
+
     async def test_custom_single_image_generation_uses_image_slot(self) -> None:
         body = {
             "model": "qwen2.5-72b-instruct",

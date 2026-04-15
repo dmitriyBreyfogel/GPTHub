@@ -377,6 +377,17 @@ def _classify_runtime_question(text: str) -> TaskClassification | None:
     )
 
 
+def _classify_casual_dialogue(text: str) -> TaskClassification | None:
+    if not query_signals.looks_like_casual_dialogue(text):
+        return None
+    return TaskClassification(
+        task_type=TaskType.TEXT,
+        routing_reason="Casual dialogue: the request is ordinary conversation or emotional support and does not require web search.",
+        confidence=0.95,
+        method="casual_dialogue",
+    )
+
+
 class TaskClassifier:
     def __init__(
         self,
@@ -405,6 +416,10 @@ class TaskClassifier:
         runtime_result = _classify_runtime_question(text)
         if runtime_result:
             return runtime_result
+
+        casual_dialogue_result = _classify_casual_dialogue(text)
+        if casual_dialogue_result:
+            return casual_dialogue_result
 
         text_shape_result = _classify_by_text_shape(text)
         if text_shape_result:

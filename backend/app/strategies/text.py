@@ -80,9 +80,14 @@ class TextStrategy:
             f"- Current year: {current_dt.year}\n"
             "Используй эти значения для вопросов про сейчас, сегодня, текущую дату, время и год."
         )
+        dialog_context_guard = (
+            "The provided chat history is authoritative for questions about this current conversation. "
+            "If the user asks what they or the assistant said earlier in this chat, answer from the provided messages "
+            "and quote the relevant turn instead of claiming the information is unavailable."
+        )
         evidence_guard = (
             "If the user asks for current or external factual information that is not present in the provided context, "
             "do not guess, do not rely on stale training knowledge, and do not fabricate certainty. "
             "State that web search or external sources are required."
         )
-        return f"{base_prompt}\n\n{runtime_context}\n\n{evidence_guard}"
+        return f"{base_prompt}\n\n{runtime_context}\n\n{dialog_context_guard}\n\n{evidence_guard}"

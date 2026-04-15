@@ -12,6 +12,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.core.query_signals import (
     build_classifier_context,
     build_topic_state,
+    looks_like_casual_dialogue,
     looks_like_contextual_follow_up,
     looks_like_live_quote_request,
     requires_external_evidence,
@@ -100,6 +101,12 @@ class TopicStateTests(unittest.TestCase):
 
     def test_standalone_topic_with_criteria_is_not_forced_into_follow_up_mode(self) -> None:
         self.assertFalse(looks_like_contextual_follow_up("what are the criteria for choosing a laptop?"))
+
+    def test_casual_dialogue_detects_emotional_support_request(self) -> None:
+        self.assertTrue(looks_like_casual_dialogue("мне грустно"))
+
+    def test_casual_dialogue_detects_small_talk_question(self) -> None:
+        self.assertTrue(looks_like_casual_dialogue("как у тебя настроение?"))
 
 
 if __name__ == "__main__":

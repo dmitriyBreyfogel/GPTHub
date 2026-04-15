@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from fastapi import HTTPException
@@ -22,6 +23,7 @@ from app.strategies.response_utils import extract_json_object
 
 
 COMPOUND_ORCHESTRATOR_MODEL = "gpthub-custom-orchestrator"
+DIALOG_CONTEXT_MODEL = "gpthub-dialog-context"
 PLANNER_ALLOWED_TASK_TYPES = (
     TaskType.RUNTIME,
     TaskType.TEXT,
@@ -96,6 +98,23 @@ async def build_chat_execution_plan(
     body_model = body.get("model") or request_workspace.model
     current_model_override = body_model if isinstance(body_model, str) and body_model.strip() else None
     context_messages = body.get("messages") if isinstance(body.get("messages"), list) else None
+
+    dialog_context_plan = _dialog_context_plan(
+        user_text=user_text,
+        context_messages=context_messages,
+    )
+    if dialog_context_plan is not None:
+        return dialog_context_plan
+
+    casual_dialogue_plan = _casual_dialogue_plan(
+        user_text=user_text,
+        requested_task_type=requested_task_type,
+        request_files=request_files,
+        current_model_override=current_model_override,
+        routing_models=routing_models,
+    )
+    if casual_dialogue_plan is not None:
+        return casual_dialogue_plan
 
     planned_request = None
     planned_task_type = _parse_task_type(requested_task_type)
@@ -609,6 +628,160 @@ def _capability_validation_plan(
         direct_decision=decision,
         direct_response=response,
     )
+
+
+def _dialog_context_plan(
+    *,
+    user_text: str,
+    context_messages: list[dict] | None,
+) -> ChatExecutionPlan | None:
+    if not _looks_like_first_user_message_request(user_text):
+        return None
+
+    first_user_message = _first_user_message(context_messages)
+    if not first_user_message:
+        return None
+
+    decision = RoutingDecision(
+        task_type=TaskType.TEXT,
+        model=DIALOG_CONTEXT_MODEL,
+        routing_reason="Current dialog history directly answers the request.",
+        strategy=None,
+        confidence=1.0,
+        method="dialog_context",
+        manual_override=False,
+    )
+    response = StrategyResponse(
+        content=_format_first_user_message_response(user_text, first_user_message),
+        model_used=DIALOG_CONTEXT_MODEL,
+        task_type=TaskType.TEXT,
+        routing_reason="Answered directly from the current dialog history.",
+        orchestration={
+            "kind": "dialog_context",
+            "target": "first_user_message",
+        },
+    )
+    return ChatExecutionPlan(
+        model_override=None,
+        task_type_override=None,
+        direct_decision=decision,
+        direct_response=response,
+    )
+
+
+def _casual_dialogue_plan(
+    *,
+    user_text: str,
+    requested_task_type: str | None,
+    request_files: list[RequestFile],
+    current_model_override: str | None,
+    routing_models: dict[str, str] | None,
+) -> ChatExecutionPlan | None:
+    if requested_task_type or request_files:
+        return None
+    if not query_signals.looks_like_casual_dialogue(user_text):
+        return None
+    selected_model = (routing_models or {}).get("text") or current_model_override
+    return ChatExecutionPlan(
+        model_override=selected_model,
+        task_type_override=TaskType.TEXT.value,
+    )
+
+
+def _looks_like_first_user_message_request(text: str) -> bool:
+    tokens = _dialog_tokens(text)
+    if not tokens:
+        return False
+
+    has_first_marker = any(
+        token.startswith(prefix)
+        for token in tokens
+        for prefix in ("first", "earliest", "initial", "\u043f\u0435\u0440\u0432", "\u043d\u0430\u0447\u0430\u043b")
+    )
+    has_message_marker = any(
+        token.startswith(prefix)
+        for token in tokens
+        for prefix in (
+            "message",
+            "request",
+            "prompt",
+            "query",
+            "question",
+            "\u0441\u043e\u043e\u0431\u0449\u0435\u043d",
+            "\u0437\u0430\u043f\u0440\u043e\u0441",
+            "\u0432\u043e\u043f\u0440\u043e\u0441",
+            "\u043f\u0440\u043e\u043c\u043f\u0442",
+        )
+    )
+    has_context_marker = any(
+        token in {"my", "me", "\u043c\u043e\u0439", "\u043c\u043e\u0435", "\u043c\u043e\u0451", "\u043c\u043e\u044f", "\u043c\u0435\u043d\u044f"}
+        or token.startswith(
+            (
+                "chat",
+                "dialog",
+                "conversation",
+                "\u0447\u0430\u0442",
+                "\u0434\u0438\u0430\u043b\u043e\u0433",
+                "\u0440\u0430\u0437\u0433\u043e\u0432\u043e\u0440",
+                "\u043f\u0435\u0440\u0435\u043f\u0438\u0441",
+            )
+        )
+        for token in tokens
+    )
+    has_recall_marker = any(
+        token.startswith(prefix)
+        for token in tokens
+        for prefix in (
+            "what",
+            "which",
+            "quote",
+            "remind",
+            "recall",
+            "remember",
+            "tell",
+            "show",
+            "\u043a\u0430\u043a",
+            "\u0447\u0442\u043e",
+            "\u043f\u0440\u043e\u0446\u0438\u0442",
+            "\u0446\u0438\u0442\u0438\u0440",
+            "\u043d\u0430\u043f\u043e\u043c",
+            "\u043f\u043e\u043c\u043d",
+            "\u0441\u043a\u0430\u0436",
+            "\u043f\u043e\u043a\u0430\u0436",
+        )
+    )
+    return has_first_marker and has_message_marker and has_context_marker and has_recall_marker
+
+
+def _dialog_tokens(text: str) -> tuple[str, ...]:
+    normalized = query_signals.normalize_text(text)
+    if not normalized:
+        return ()
+    return tuple(re.findall(r"[a-z\u0400-\u04ff]+", normalized))
+
+
+def _first_user_message(context_messages: list[dict] | None) -> str:
+    for raw_message in context_messages or []:
+        if not isinstance(raw_message, dict) or raw_message.get("role") != "user":
+            continue
+        content = query_signals.content_to_text(raw_message.get("content")).strip()
+        if content:
+            return content
+    return ""
+
+
+def _format_first_user_message_response(request_text: str, first_user_message: str) -> str:
+    quoted_message = _blockquote(first_user_message)
+    if re.search(r"[\u0400-\u04ff]", request_text):
+        return f"\u0412\u0430\u0448 \u043f\u0435\u0440\u0432\u044b\u0439 \u0437\u0430\u043f\u0440\u043e\u0441 \u0432 \u044d\u0442\u043e\u043c \u0434\u0438\u0430\u043b\u043e\u0433\u0435:\n{quoted_message}"
+    return f"Your first message in this conversation was:\n{quoted_message}"
+
+
+def _blockquote(text: str) -> str:
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        return ">"
+    return "\n".join(f"> {line}" if line else ">" for line in normalized.splitlines())
 
 
 def _parse_task_type(value: object) -> TaskType | None:

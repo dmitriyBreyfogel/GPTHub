@@ -108,6 +108,45 @@ _TRANSFORM_MARKERS = (
     "\u0438\u0441\u043f\u0440\u0430\u0432\u044c \u0442\u0435\u043a\u0441\u0442",
 )
 
+_CASUAL_DIALOGUE_EXACT = {
+    "hi",
+    "hello",
+    "hey",
+    "how are you",
+    "how are you?",
+    "how's it going",
+    "how is it going",
+    "\u043f\u0440\u0438\u0432\u0435\u0442",
+    "\u043f\u0440\u0438\u0432\u0435\u0442!",
+    "\u0437\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439",
+    "\u0437\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439\u0442\u0435",
+    "\u043a\u0430\u043a \u0434\u0435\u043b\u0430",
+    "\u043a\u0430\u043a \u0434\u0435\u043b\u0430?",
+    "\u043a\u0430\u043a \u0442\u044b",
+    "\u043a\u0430\u043a \u0442\u044b?",
+    "\u043a\u0430\u043a \u0443 \u0442\u0435\u0431\u044f \u0434\u0435\u043b\u0430",
+    "\u043a\u0430\u043a \u0443 \u0442\u0435\u0431\u044f \u0434\u0435\u043b\u0430?",
+    "\u043a\u0430\u043a \u0443 \u0442\u0435\u0431\u044f \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0438\u0435",
+    "\u043a\u0430\u043a \u0443 \u0442\u0435\u0431\u044f \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0438\u0435?",
+}
+
+_CASUAL_DIALOGUE_MARKERS = (
+    "how are you",
+    "how's it going",
+    "how is it going",
+    "what's your mood",
+    "what is your mood",
+    "\u043a\u0430\u043a \u0434\u0435\u043b\u0430",
+    "\u043a\u0430\u043a \u0442\u044b",
+    "\u043a\u0430\u043a \u0443 \u0442\u0435\u0431\u044f \u0434\u0435\u043b\u0430",
+    "\u043a\u0430\u043a \u0443 \u0442\u0435\u0431\u044f \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u0438\u0435",
+)
+
+_EMOTIONAL_DISCLOSURE_PATTERNS = (
+    r"^(?:i am|i'm|im|feeling)\s+(?:sad|down|lonely|anxious|upset|tired|stressed)\b",
+    r"^(?:\u043c\u043d\u0435|\u044f)\s+(?:\u0433\u0440\u0443\u0441\u0442\u043d\u043e|\u043f\u043b\u043e\u0445\u043e|\u0442\u0440\u0435\u0432\u043e\u0436\u043d\u043e|\u043e\u0434\u0438\u043d\u043e\u043a\u043e|\u0442\u044f\u0436\u0435\u043b\u043e|\u0441\u0442\u0440\u0430\u0448\u043d\u043e|\u043d\u0435 \u043f\u043e \u0441\u0435\u0431\u0435|\u0443\u0441\u0442\u0430\u043b|\u0443\u0441\u0442\u0430\u043b\u0430)\b",
+)
+
 _SEARCH_MARKERS = (
     "official",
     "official page",
@@ -389,6 +428,25 @@ def looks_like_transform_request(text: str) -> bool:
     if not normalized:
         return False
     return any(marker in normalized for marker in _TRANSFORM_MARKERS)
+
+
+def looks_like_casual_dialogue(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+    if URL_PATTERN.search(normalized):
+        return False
+    if looks_like_runtime_question(text) or looks_like_transform_request(text):
+        return False
+    if looks_like_live_quote_request(text) or has_explicit_search_markers(text):
+        return False
+    if YEAR_PATTERN.search(normalized) and looks_like_information_request(text):
+        return False
+    if normalized in _CASUAL_DIALOGUE_EXACT:
+        return True
+    if any(marker in normalized for marker in _CASUAL_DIALOGUE_MARKERS):
+        return True
+    return any(re.search(pattern, normalized, flags=re.IGNORECASE) for pattern in _EMOTIONAL_DISCLOSURE_PATTERNS)
 
 
 def looks_like_information_request(text: str) -> bool:
