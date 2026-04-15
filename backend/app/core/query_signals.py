@@ -6,6 +6,18 @@ from dataclasses import dataclass
 
 URL_PATTERN = re.compile(r"https?://[^\s<>)\"']+")
 YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
+FOLLOW_UP_REFERENCE_PATTERN = re.compile(
+    r"\b("
+    r"this|that|these|those|it|its|they|them|their|he|she|him|her|here|there|"
+    r"\u044d\u0442\u043e\u0442|\u044d\u0442\u0430|\u044d\u0442\u043e|\u044d\u0442\u0438|\u0442\u043e\u0433\u043e|\u0442\u043e\u043c|"
+    r"\u0442\u0430\u043a\u043e\u0439|\u0442\u0430\u043a\u0430\u044f|\u0442\u0430\u043a\u043e\u0435|\u0442\u0430\u043a\u0438\u0435|"
+    r"\u043e\u043d|\u043e\u043d\u0430|\u043e\u043d\u043e|\u043e\u043d\u0438|\u0435\u0433\u043e|\u0435\u0435|\u0435\u0451|\u0438\u0445|"
+    r"\u0435\u043c\u0443|\u0435\u0439|\u0438\u043c|\u043d\u0435\u043c|\u043d\u0451\u043c|\u043d\u0435\u0439|\u043d\u0438\u0445|"
+    r"\u0437\u0434\u0435\u0441\u044c|\u0442\u0443\u0442|\u0442\u0430\u043c|\u044d\u0442\u043e\u0433\u043e|\u044d\u0442\u043e\u043c|"
+    r"\u044d\u0442\u043e\u0439|\u044d\u0442\u0438\u0445"
+    r")\b",
+    re.IGNORECASE,
+)
 
 _RUNTIME_MARKERS = (
     "what year is it",
@@ -137,6 +149,195 @@ _SEARCH_MARKERS = (
     "\u043f\u0440\u0430\u0432\u0438\u043b",
 )
 
+_SELF_PROFILE_EXACT = {
+    "who am i",
+    "who am i?",
+    "what do you know about me",
+    "what do you remember about me",
+    "\u043a\u0442\u043e \u044f",
+    "\u043a\u0442\u043e \u044f?",
+    "\u043a\u0430\u043a \u043c\u0435\u043d\u044f \u0437\u043e\u0432\u0443\u0442",
+    "\u043a\u0430\u043a \u043c\u0435\u043d\u044f \u0437\u043e\u0432\u0443\u0442?",
+    "\u0447\u0442\u043e \u0442\u044b \u0437\u043d\u0430\u0435\u0448\u044c \u043e\u0431\u043e \u043c\u043d\u0435",
+    "\u0447\u0442\u043e \u0442\u044b \u0437\u043d\u0430\u0435\u0448\u044c \u043e\u0431\u043e \u043c\u043d\u0435?",
+    "\u0447\u0442\u043e \u0442\u044b \u043f\u043e\u043c\u043d\u0438\u0448\u044c \u043e\u0431\u043e \u043c\u043d\u0435",
+    "\u0447\u0442\u043e \u0442\u044b \u043f\u043e\u043c\u043d\u0438\u0448\u044c \u043e\u0431\u043e \u043c\u043d\u0435?",
+}
+
+_SELF_PROFILE_MARKERS = (
+    "who am i",
+    "what do you know about me",
+    "what do you remember about me",
+    "what's my name",
+    "what is my name",
+    "\u043a\u0442\u043e \u044f",
+    "\u043a\u0430\u043a \u043c\u0435\u043d\u044f \u0437\u043e\u0432\u0443\u0442",
+    "\u0447\u0442\u043e \u0442\u044b \u0437\u043d\u0430\u0435\u0448\u044c \u043e\u0431\u043e \u043c\u043d\u0435",
+    "\u0447\u0442\u043e \u0442\u0435\u0431\u0435 \u0438\u0437\u0432\u0435\u0441\u0442\u043d\u043e \u043e\u0431\u043e \u043c\u043d\u0435",
+    "\u0447\u0442\u043e \u0442\u044b \u043f\u043e\u043c\u043d\u0438\u0448\u044c \u043e\u0431\u043e \u043c\u043d\u0435",
+    "\u0447\u0442\u043e \u0442\u044b \u043f\u043e\u043c\u043d\u0438\u0448\u044c \u043f\u0440\u043e \u043c\u0435\u043d\u044f",
+)
+
+_FOLLOW_UP_PREFIXES = (
+    "a ",
+    "and ",
+    "also ",
+    "then ",
+    "what about ",
+    "how about ",
+    "\u0430 ",
+    "\u0438 ",
+    "\u043d\u0443 \u0438 ",
+    "\u0442\u043e\u0433\u0434\u0430 ",
+    "\u0430 \u0447\u0442\u043e \u043d\u0430\u0441\u0447\u0435\u0442 ",
+    "\u0430 \u0447\u0442\u043e \u043d\u0430\u0441\u0447\u0451\u0442 ",
+    "\u0447\u0442\u043e \u043d\u0430\u0441\u0447\u0435\u0442 ",
+    "\u0447\u0442\u043e \u043d\u0430\u0441\u0447\u0451\u0442 ",
+    "\u0430 \u043a\u0430\u043a \u043d\u0430\u0441\u0447\u0435\u0442 ",
+    "\u0430 \u043a\u0430\u043a \u043d\u0430\u0441\u0447\u0451\u0442 ",
+)
+
+_CONTEXT_DEPENDENT_MARKERS = (
+    "deadline",
+    "deadlines",
+    "criteria",
+    "evaluation",
+    "judging",
+    "requirements",
+    "conditions",
+    "rules",
+    "schedule",
+    "results",
+    "winners",
+    "prize",
+    "prizes",
+    "registration",
+    "final",
+    "stage",
+    "\u0434\u0435\u0434\u043b\u0430\u0439\u043d",
+    "\u0441\u0440\u043e\u043a",
+    "\u043a\u0440\u0438\u0442\u0435\u0440",
+    "\u043e\u0446\u0435\u043d\u043a",
+    "\u0442\u0440\u0435\u0431\u043e\u0432",
+    "\u0443\u0441\u043b\u043e\u0432",
+    "\u043f\u0440\u0430\u0432\u0438\u043b",
+    "\u0440\u0430\u0441\u043f\u0438\u0441\u0430\u043d",
+    "\u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442",
+    "\u0438\u0442\u043e\u0433",
+    "\u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b",
+    "\u043f\u0440\u0438\u0437",
+    "\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430",
+    "\u0444\u0438\u043d\u0430\u043b",
+    "\u044d\u0442\u0430\u043f",
+    "\u0436\u044e\u0440\u0438",
+    "\u043e\u0440\u0433\u0430\u043d\u0438\u0437\u0430\u0442",
+)
+
+_QUOTE_VALUE_MARKERS = (
+    "how much",
+    "price",
+    "cost",
+    "quote",
+    "rate",
+    "exchange rate",
+    "what is the rate",
+    "what is the price",
+    "\u0441\u043a\u043e\u043b\u044c\u043a\u043e",
+    "\u043a\u0430\u043a\u043e\u0439 \u043a\u0443\u0440\u0441",
+    "\u043a\u0430\u043a\u0430\u044f \u0446\u0435\u043d\u0430",
+    "\u0446\u0435\u043d\u0430",
+    "\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c",
+    "\u0441\u0442\u043e\u0438\u0442",
+    "\u043a\u043e\u0442\u0438\u0440\u043e\u0432",
+    "\u043f\u043e \u0447\u0451\u043c",
+    "\u043f\u043e \u0447\u0435\u043c",
+    "\u043f\u043e\u0447\u0435\u043c",
+)
+
+_QUOTE_ENTITY_MARKERS = (
+    "usd",
+    "eur",
+    "rub",
+    "ruble",
+    "dollar",
+    "euro",
+    "brent",
+    "wti",
+    "oil",
+    "barrel",
+    "gold",
+    "silver",
+    "bitcoin",
+    "btc",
+    "\u0434\u043e\u043b\u043b\u0430\u0440",
+    "\u0435\u0432\u0440\u043e",
+    "\u0440\u0443\u0431\u043b",
+    "\u043d\u0435\u0444\u0442",
+    "\u0431\u0430\u0440\u0440\u0435\u043b",
+    "\u0437\u043e\u043b\u043e\u0442",
+    "\u0441\u0435\u0440\u0435\u0431\u0440",
+    "\u0431\u0438\u0442\u043a\u043e\u0438\u043d",
+)
+
+_GENERIC_CONTEXT_TOKENS = {
+    "and",
+    "criteria",
+    "evaluation",
+    "judging",
+    "requirements",
+    "conditions",
+    "rules",
+    "schedule",
+    "results",
+    "winner",
+    "winners",
+    "prize",
+    "prizes",
+    "registration",
+    "final",
+    "stage",
+    "project",
+    "projects",
+    "team",
+    "teams",
+    "participant",
+    "participants",
+    "main",
+    "key",
+    "basic",
+    "details",
+    "\u0438",
+    "\u0430",
+    "\u043a\u0440\u0438\u0442\u0435\u0440\u0438\u0438",
+    "\u043a\u0440\u0438\u0442\u0435\u0440\u0438\u0435\u0432",
+    "\u043e\u0446\u0435\u043d\u043a\u0430",
+    "\u043e\u0446\u0435\u043d\u043a\u0438",
+    "\u0442\u0440\u0435\u0431\u043e\u0432\u0430\u043d\u0438\u044f",
+    "\u0443\u0441\u043b\u043e\u0432\u0438\u044f",
+    "\u043f\u0440\u0430\u0432\u0438\u043b\u0430",
+    "\u0440\u0430\u0441\u043f\u0438\u0441\u0430\u043d\u0438\u0435",
+    "\u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442\u044b",
+    "\u0438\u0442\u043e\u0433\u0438",
+    "\u043f\u043e\u0431\u0435\u0434\u0438\u0442\u0435\u043b\u0438",
+    "\u043f\u0440\u0438\u0437\u044b",
+    "\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0446\u0438\u044f",
+    "\u0444\u0438\u043d\u0430\u043b",
+    "\u044d\u0442\u0430\u043f",
+    "\u043f\u0440\u043e\u0435\u043a\u0442",
+    "\u043f\u0440\u043e\u0435\u043a\u0442\u044b",
+    "\u043f\u0440\u043e\u0435\u043a\u0442\u043e\u0432",
+    "\u043a\u043e\u043c\u0430\u043d\u0434\u0430",
+    "\u043a\u043e\u043c\u0430\u043d\u0434\u044b",
+    "\u043a\u043e\u043c\u0430\u043d\u0434",
+    "\u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a",
+    "\u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u0438",
+    "\u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432",
+    "\u043e\u0441\u043d\u043e\u0432\u043d\u044b\u0435",
+    "\u0433\u043b\u0430\u0432\u043d\u044b\u0435",
+    "\u043a\u043b\u044e\u0447\u0435\u0432\u044b\u0435",
+    "\u0434\u0435\u0442\u0430\u043b\u0438",
+}
+
 
 @dataclass(frozen=True)
 class TopicState:
@@ -204,6 +405,58 @@ def has_explicit_search_markers(text: str) -> bool:
     if not normalized:
         return False
     return any(marker in normalized for marker in _SEARCH_MARKERS)
+
+
+def looks_like_self_profile_request(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+    if normalized in _SELF_PROFILE_EXACT:
+        return True
+    return any(marker in normalized for marker in _SELF_PROFILE_MARKERS)
+
+
+def looks_like_contextual_follow_up(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized or looks_like_self_profile_request(text):
+        return False
+    if looks_like_live_quote_request(text):
+        return False
+    if FOLLOW_UP_REFERENCE_PATTERN.search(normalized):
+        return True
+    if any(normalized.startswith(prefix) for prefix in _FOLLOW_UP_PREFIXES):
+        return True
+    if not any(marker in normalized for marker in _CONTEXT_DEPENDENT_MARKERS):
+        return False
+    if _looks_like_named_topic(text):
+        return False
+    return not _has_standalone_topic_token(text)
+
+
+def looks_like_live_quote_request(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized or looks_like_transform_request(text):
+        return False
+    has_value_marker = any(marker in normalized for marker in _QUOTE_VALUE_MARKERS)
+    has_entity_marker = any(marker in normalized for marker in _QUOTE_ENTITY_MARKERS)
+    if not (has_value_marker and has_entity_marker):
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "?",
+            "how much",
+            "what is",
+            "current",
+            "today",
+            "now",
+            "\u0441\u043a\u043e\u043b\u044c\u043a\u043e",
+            "\u043a\u0430\u043a\u043e\u0439",
+            "\u043a\u0430\u043a\u0430\u044f",
+            "\u0441\u0435\u0439\u0447\u0430\u0441",
+            "\u0441\u0435\u0433\u043e\u0434\u043d\u044f",
+        )
+    )
 
 
 def build_topic_state(context_messages: list[dict] | None, *, current_text: str = "") -> TopicState:
@@ -303,11 +556,15 @@ def requires_external_evidence(text: str, context_messages: list[dict] | None = 
         return False
     if looks_like_runtime_question(text) or looks_like_transform_request(text):
         return False
+    if looks_like_self_profile_request(text):
+        return False
     if has_explicit_search_markers(text):
+        return True
+    if looks_like_live_quote_request(text):
         return True
 
     topic_state = build_topic_state(context_messages, current_text=text)
-    if topic_state.has_sourced_context and looks_like_information_request(text):
+    if topic_state.has_sourced_context and looks_like_information_request(text) and looks_like_contextual_follow_up(text):
         return True
 
     if YEAR_PATTERN.search(normalized) and looks_like_information_request(text):
@@ -427,6 +684,17 @@ def _looks_like_named_topic(text: str) -> bool:
     if re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", text):
         return True
     if re.search(r"\b[А-ЯЁ][а-яё]+(?:\s+[А-ЯЁA-Z][а-яёa-zA-Z0-9-]+)+\b", text):
+        return True
+    return False
+
+
+def _has_standalone_topic_token(text: str) -> bool:
+    tokens = re.findall(r"[A-Za-z\u0410-\u042f\u0430-\u044f0-9-]+", (text or "").lower())
+    for token in tokens:
+        if token in _GENERIC_CONTEXT_TOKENS:
+            continue
+        if len(token) < 4 and not any(char.isdigit() for char in token):
+            continue
         return True
     return False
 

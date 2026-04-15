@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import AsyncIterator
@@ -87,6 +88,54 @@ class PresentationStrategy:
     _card = RGBColor(255, 255, 255)
     _line = RGBColor(224, 229, 237)
     _white = RGBColor(255, 255, 255)
+    _presentation_request_markers = (
+        "presentation",
+        "slide deck",
+        "slides",
+        "ppt",
+        "pptx",
+        "презентац",
+        "слайды",
+        "слайд",
+    )
+    _presentation_edit_markers = (
+        "add",
+        "more",
+        "bigger",
+        "shorter",
+        "longer",
+        "expand",
+        "reduce",
+        "remove",
+        "update",
+        "revise",
+        "improve",
+        "visual",
+        "images",
+        "picture",
+        "illustration",
+        "design",
+        "style",
+        "добав",
+        "побольше",
+        "поменьше",
+        "больше",
+        "меньше",
+        "увелич",
+        "уменьш",
+        "сократ",
+        "расшир",
+        "обнов",
+        "передел",
+        "улучш",
+        "картин",
+        "иллюстра",
+        "дизайн",
+        "оформ",
+        "стиль",
+        "визуал",
+        "информатив",
+    )
 
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
         if not request.text.strip():
@@ -127,6 +176,7 @@ class PresentationStrategy:
         yield b"data: [DONE]\n\n"
 
     async def _generate_slide_specs(self, request: StrategyRequest) -> list[SlideSpec]:
+        resolved_request = self._resolve_request_text(request)
         messages = [
             ChatMessage(
                 role="system",
@@ -134,7 +184,7 @@ class PresentationStrategy:
                     workspace_instructions=request.workspace_instructions,
                 ),
             ),
-            ChatMessage(role="user", content=request.text.strip()),
+            ChatMessage(role="user", content=resolved_request),
         ]
         response = await mws_client.chat(
             messages,
@@ -145,9 +195,102 @@ class PresentationStrategy:
         data = extract_json_object(response.content) or {}
         slides = self._parse_slides(data)
         if not slides:
-            slides = self._fallback_slides(request.text.strip())
+            slides = self._fallback_slides(resolved_request)
         slides = slides[: self.max_slides]
         return await self._enrich_slides_with_images(slides)
+
+    def _resolve_request_text(self, request: StrategyRequest) -> str:
+        current_text = request.text.strip()
+        if not current_text:
+            return current_text
+        if not self._looks_like_presentation_edit_request(current_text):
+            return current_text
+
+        topic = self._presentation_topic_from_context(request.context_messages, current_text)
+        if not topic:
+            return current_text
+
+        return (
+            f'Исходная тема презентации: "{topic}".\n'
+            f"Обнови презентацию по этой же теме. Новые требования: {current_text}\n"
+            "Не меняй тему презентации. Измени только объём, структуру, визуальное наполнение и оформление в рамках этого запроса."
+        )
+
+    def _looks_like_presentation_edit_request(self, text: str) -> bool:
+        normalized = self._normalize_text(text)
+        if not normalized:
+            return False
+        has_edit_marker = any(marker in normalized for marker in self._presentation_edit_markers)
+        if not has_edit_marker:
+            return False
+        return not self._looks_like_topic_request(normalized)
+
+    def _presentation_topic_from_context(
+        self,
+        context_messages: list[dict] | None,
+        current_text: str,
+    ) -> str:
+        current_normalized = self._normalize_text(current_text)
+        for raw_message in reversed(context_messages or []):
+            if not isinstance(raw_message, dict) or raw_message.get("role") != "user":
+                continue
+            text = self._message_to_text(raw_message.get("content"))
+            if not text:
+                continue
+            if self._normalize_text(text) == current_normalized:
+                continue
+            topic = self._extract_topic_from_request(text)
+            if topic:
+                return topic
+        return ""
+
+    def _extract_topic_from_request(self, text: str) -> str:
+        cleaned = " ".join((text or "").split()).strip()
+        if not cleaned:
+            return ""
+        lowered = cleaned.lower()
+        if self._looks_like_presentation_edit_request(cleaned):
+            return ""
+
+        patterns = (
+            r"(?:presentation|slide deck|slides)\s+(?:about|on)\s*[:\-]?\s*(.+)$",
+            r"(?:\u043f\u0440\u0435\u0437\u0435\u043d\u0442\u0430\u0446(?:\u0438\u044e|\u0438\u044f)|\u0441\u043b\u0430\u0439\u0434\u044b?)\s+(?:\u043d\u0430 \u0442\u0435\u043c\u0443|\u043f\u0440\u043e|\u043e|\u043e\u0431)\s*[:\-]?\s*(.+)$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, lowered, flags=re.IGNORECASE)
+            if not match:
+                continue
+            candidate = cleaned[match.start(1) :].strip(" :,-")
+            if candidate:
+                return candidate[:240]
+
+        if self._looks_like_topic_request(lowered):
+            return cleaned[:240]
+        return ""
+
+    def _looks_like_topic_request(self, normalized_text: str) -> bool:
+        return any(marker in normalized_text for marker in self._presentation_request_markers)
+
+    def _message_to_text(self, content: object) -> str:
+        if isinstance(content, str):
+            return content.strip()
+        if not isinstance(content, list):
+            return ""
+
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            item_text = item.get("text")
+            if isinstance(item_text, str):
+                parts.append(item_text)
+        return "\n".join(part.strip() for part in parts if part.strip())
+
+    def _normalize_text(self, text: str) -> str:
+        return " ".join((text or "").strip().lower().split())
 
     def _parse_slides(self, data: dict) -> list[SlideSpec]:
         raw_slides = data.get("slides")

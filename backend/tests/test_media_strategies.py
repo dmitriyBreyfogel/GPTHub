@@ -486,6 +486,41 @@ class PresentationStrategyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("spot illustration", fake_client.image_calls[0]["prompt"])
         self.assertIn("not a full-slide background", fake_client.image_calls[0]["prompt"])
 
+    async def test_generate_slide_specs_preserves_original_topic_for_follow_up_edit(self) -> None:
+        strategy = PresentationStrategy()
+        fake_client = _FakePresentationClient(
+            {
+                "slides": [
+                    {
+                        "title": "Animal welfare",
+                        "bullets": ["Reasons", "Practice"],
+                    }
+                ]
+            }
+        )
+
+        request = StrategyRequest(
+            task_type=TaskType.PRESENTATION,
+            text="make more slides, add more informative slides and include pictures",
+            user_id="anonymous",
+            model_override="slides-model",
+            context_messages=[
+                {"role": "user", "content": "generate a presentation on the topic: caring for animals"},
+                {"role": "assistant", "content": "Presentation is ready"},
+            ],
+        )
+
+        with (
+            patch("app.strategies.presentation.mws_client", fake_client),
+            patch.object(strategy, "_fetch_image_bytes", new=AsyncMock(return_value=None)),
+        ):
+            await strategy._generate_slide_specs(request)
+
+        prompt = fake_client.chat_calls[0]["messages"][1].content
+        self.assertIn("caring for animals", prompt.lower())
+        self.assertIn("include pictures", prompt.lower())
+        self.assertIn("не меняй тему презентации", prompt.lower())
+
     async def test_enrich_slides_converts_extra_image_layouts_to_content(self) -> None:
         strategy = PresentationStrategy()
         strategy.max_generated_images = 1

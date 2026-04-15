@@ -9,7 +9,13 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.core.query_signals import build_classifier_context, build_topic_state, requires_external_evidence
+from app.core.query_signals import (
+    build_classifier_context,
+    build_topic_state,
+    looks_like_contextual_follow_up,
+    looks_like_live_quote_request,
+    requires_external_evidence,
+)
 
 
 class TopicStateTests(unittest.TestCase):
@@ -69,6 +75,31 @@ class TopicStateTests(unittest.TestCase):
         ]
 
         self.assertTrue(requires_external_evidence("А какие призы?", context_messages))
+
+
+    def test_self_profile_question_does_not_require_external_evidence_after_sourced_answer(self) -> None:
+        context_messages = [
+            {"role": "user", "content": "Find the current Brent oil price"},
+            {
+                "role": "assistant",
+                "content": "Brent = 99.37 [1]",
+                "sources": ["https://example.com/brent"],
+            },
+        ]
+
+        self.assertFalse(requires_external_evidence("who am i?", context_messages))
+
+    def test_live_quote_request_requires_external_evidence_even_without_history(self) -> None:
+        query = "what is the dollar exchange rate?"
+
+        self.assertTrue(looks_like_live_quote_request(query))
+        self.assertTrue(requires_external_evidence(query))
+
+    def test_standalone_quote_lookup_is_not_treated_as_contextual_follow_up(self) -> None:
+        self.assertFalse(looks_like_contextual_follow_up("and what is the dollar exchange rate?"))
+
+    def test_standalone_topic_with_criteria_is_not_forced_into_follow_up_mode(self) -> None:
+        self.assertFalse(looks_like_contextual_follow_up("what are the criteria for choosing a laptop?"))
 
 
 if __name__ == "__main__":

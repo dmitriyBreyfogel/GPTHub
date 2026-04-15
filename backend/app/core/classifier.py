@@ -323,6 +323,14 @@ def _classify_by_search_need(
             method="search_heuristic",
         )
 
+    if query_signals.looks_like_live_quote_request(text):
+        return TaskClassification(
+            task_type=TaskType.SEARCH,
+            routing_reason="Current quote lookup: the request asks for a current price, rate or market value that should be checked externally.",
+            confidence=0.88,
+            method="search_heuristic",
+        )
+
     if YEAR_PATTERN.search(normalized) and query_signals.looks_like_information_request(text):
         return TaskClassification(
             task_type=TaskType.SEARCH,
@@ -335,6 +343,7 @@ def _classify_by_search_need(
     if (
         topic_state.has_sourced_context
         and query_signals.looks_like_information_request(text)
+        and query_signals.looks_like_contextual_follow_up(text)
         and not query_signals.looks_like_transform_request(text)
     ):
         context_seed = f"{topic_state.previous_user_text}\n{topic_state.last_sourced_assistant_text}"

@@ -227,6 +227,35 @@ class TaskClassifierTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(TaskType.SEARCH, result.task_type)
         self.assertIn(result.method, {"search_context", "search_heuristic"})
 
+    async def test_self_profile_question_after_sourced_answer_does_not_get_stuck_in_search_context(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(return_value=_classification(TaskType.TEXT))
+        classifier._classify_llm = AsyncMock(side_effect=AssertionError("llm must not run"))
+
+        context_messages = [
+            {"role": "user", "content": "Find the current Brent oil price"},
+            {
+                "role": "assistant",
+                "content": "Brent = 99.37 [1]",
+                "sources": ["https://example.com/brent"],
+            },
+        ]
+
+        result = await classifier.classify("who am i?", context_messages=context_messages)
+
+        self.assertEqual(TaskType.TEXT, result.task_type)
+        self.assertEqual("semantic", result.method)
+
+    async def test_live_quote_lookup_routes_to_search(self) -> None:
+        classifier = TaskClassifier()
+        classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))
+        classifier._classify_llm = AsyncMock(side_effect=AssertionError("llm must not run"))
+
+        result = await classifier.classify("what is the dollar exchange rate?")
+
+        self.assertEqual(TaskType.SEARCH, result.task_type)
+        self.assertEqual("search_heuristic", result.method)
+
     async def test_topic_lookup_with_year_routes_to_search_even_without_explicit_search_button(self) -> None:
         classifier = TaskClassifier()
         classifier._classify_semantic = AsyncMock(side_effect=AssertionError("semantic must not run"))

@@ -174,7 +174,7 @@ class PromptCacheManager:
     def build_search_system_prompt(self, *, profile_text: str = "", workspace_instructions: str = "") -> str:
         return self._join(
             self._static_prompt(
-                "search:v4",
+                "search:v5",
                 [
                     "Ты GPTHub, корпоративный AI-помощник, который отвечает на основе результатов веб-поиска.",
                     "Твоя цель — дать полезный, законченный и decision-ready ответ по найденным фрагментам, а не пересказать поисковую выдачу.",
@@ -206,6 +206,16 @@ class PromptCacheManager:
                     "- Для каждого важного утверждения указывай источник в формате [1], [2].",
                     "- Для сложных тем используй структуру: краткий вывод, подтвержденные факты, расхождения/неясности, источники.",
                     "- В конце добавляй раздел 'Источники:' со списком использованных URL.",
+                ],
+            ),
+            self._static_prompt(
+                "search:format-overrides:v1",
+                [
+                    "Additional formatting rules for normal web-search answers:",
+                    "- For a simple factual lookup, answer directly in 1-2 sentences instead of turning the answer into a source list.",
+                    "- Use at most one numeric citation per paragraph or self-contained statement.",
+                    "- Never output citation bundles such as [1, 2] or repeated adjacent citations such as [1] [2].",
+                    "- Do not add a trailing 'Sources:' or 'Источники:' section for normal search responses.",
                 ],
             ),
             self._cached_section(

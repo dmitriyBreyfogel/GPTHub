@@ -11,7 +11,9 @@ from app.providers.mws_gpt import ChatMessage, mws_client
 from app.providers.search.base import SearchProvider, SearchResult
 from app.providers.search.duckduckgo import DuckDuckGoSearch
 from app.strategies.base import StrategyRequest, StrategyResponse, TaskType
+from app.strategies.deep_research_support import normalize_citation_style, strip_sources_section
 from app.strategies.query_context import resolve_search_query
+from app.strategies.response_utils import stream_chunk
 
 
 class SearchStrategy:
@@ -24,27 +26,10 @@ class SearchStrategy:
         self._search_provider = search_provider or DuckDuckGoSearch()
 
     async def execute(self, request: StrategyRequest) -> StrategyResponse:
-        search_query = await resolve_search_query(
-            request.text,
-            request.context_messages,
-            request.model_override,
-            request.memory_context,
-        )
-        results = await self._search(request.text, search_query)
-        messages = self._build_messages(
-            request.text,
-            search_query,
-            results,
-            request.memory_context.profile_prompt_text() if request.memory_context else "",
-            request.workspace_instructions,
-        )
-        response = await mws_client.chat(
-            messages,
-            model=request.model_override,
-            generation_options=request.generation_options,
-        )
+        search_query, results, messages = await self._prepare_search(request)
+        response = await mws_client.chat(messages, model=request.model_override, generation_options=request.generation_options)
         return StrategyResponse(
-            content=response.content,
+            content=self._finalize_answer(response.content),
             model_used=response.model,
             task_type=self.task_type,
             routing_reason="Search strategy: web search results were retrieved and synthesized.",
@@ -52,6 +37,12 @@ class SearchStrategy:
         )
 
     async def stream(self, request: StrategyRequest) -> AsyncIterator[bytes]:
+        response = await self.execute(request)
+        yield stream_chunk(response, response.content, finish_reason=None, include_gpthub=True)
+        yield stream_chunk(response, "", finish_reason="stop", include_gpthub=True)
+        yield b"data: [DONE]\n\n"
+
+    async def _prepare_search(self, request: StrategyRequest) -> tuple[str, list[SearchResult], list[ChatMessage]]:
         search_query = await resolve_search_query(
             request.text,
             request.context_messages,
@@ -66,12 +57,7 @@ class SearchStrategy:
             request.memory_context.profile_prompt_text() if request.memory_context else "",
             request.workspace_instructions,
         )
-        async for chunk in mws_client.chat_stream(
-            messages,
-            model=request.model_override,
-            generation_options=request.generation_options,
-        ):
-            yield chunk
+        return search_query, results, messages
 
     async def _search(self, original_query: str, search_query: str) -> list[SearchResult]:
         queries = self._candidate_queries(original_query, search_query)
@@ -218,3 +204,10 @@ class SearchStrategy:
         if len(normalized) <= limit:
             return normalized
         return normalized[: limit - 1].rstrip() + "..."
+
+    def _finalize_answer(self, answer: str) -> str:
+        body = strip_sources_section(answer)
+        body = normalize_citation_style(body)
+        body = re.sub(r"\[\s*(\d+)\s*,\s*\d+(?:\s*,\s*\d+)*\s*\]", r"[\1]", body)
+        body = re.sub(r"(?:\[\d+\]\s*){2,}", lambda match: match.group(0).split()[0], body)
+        return body.strip()

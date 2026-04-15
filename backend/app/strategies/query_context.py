@@ -4,7 +4,12 @@ import re
 
 from app.api.v1.chat_support.parsing import content_to_text
 from app.core.prompt_cache import prompt_cache_manager
-from app.core.query_signals import build_topic_state
+from app.core.query_signals import (
+    build_topic_state,
+    looks_like_contextual_follow_up,
+    looks_like_live_quote_request,
+    looks_like_self_profile_request,
+)
 from app.memory.context import MemoryContext
 from app.providers.mws_gpt import ChatMessage, mws_client
 
@@ -120,7 +125,11 @@ def _needs_resolution(query: str) -> bool:
     normalized = _normalize(query)
     if not normalized:
         return False
-    return len(normalized.split()) <= 8 or FOLLOW_UP_PATTERN.search(normalized) is not None
+    if looks_like_self_profile_request(query) or looks_like_live_quote_request(query):
+        return False
+    if looks_like_contextual_follow_up(query):
+        return True
+    return len(normalized.split()) <= 4
 
 
 def _last_previous_user(turns: list[tuple[str, str]]) -> str:
