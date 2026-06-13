@@ -1,0 +1,137 @@
+:root {
+    --mts-red: #E30611;
+    --mts-red-hover: #c00510;
+    --mts-red-subtle: rgba(227, 6, 17, 0.12);
+    --mts-red-border: rgba(227, 6, 17, 0.35);
+    --mts-black: #0a0a0a;
+    --mts-surface: #1a1a1a;
+    --mts-surface2: #242424;
+    --mts-border: rgba(255, 255, 255, 0.10);
+    --mts-text: #f0f0f0;
+    --mts-text-muted: #888;
+    --mts-tts-size: 28px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--mts-red) !important;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline-color: var(--mts-red) !important;
+    ring-color: var(--mts-red) !important;
+}
+
+[class*="ring-blue"],
+[class*="border-blue"],
+[class*="bg-blue"] {
+    --tw-ring-color: var(--mts-red) !important;
+    border-color: var(--mts-red) !important;
+}
+
+.bg-white.dark\:bg-gray-850,
+[class*="chat-input"],
+#chat-textarea,
+textarea[id*="chat"] {
+    border-color: rgba(227, 6, 17, 0.3) !important;
+}
+
+textarea:focus,
+div[contenteditable]:focus {
+    border-color: var(--mts-red) !important;
+    box-shadow: 0 0 0 2px rgba(227, 6, 17, 0.15) !important;
+}
+
+[class*="scrollbar"]::-webkit-scrollbar-thumb,
+[class*="overflow"]::-webkit-scrollbar-thumb {
+    background-color: var(--mts-red) !important;
+    border-radius: 4px;
+}
+
+.dark [class*="hover\\:bg-gray-100"]:hover,
+[class*="hover\\:bg-gray-100"]:hover {
+    background-color: rgba(227, 6, 17, 0.08) !important;
+}
+
+[class*="bg-blue-500"],
+[class*="bg-blue-600"],
+[class*="bg-blue-700"] {
+    background-color: var(--mts-red) !important;
+}
+
+[class*="text-blue-500"],
+[class*="text-blue-600"] {
+    color: var(--mts-red) !important;
+}
+
+button[class*="bg-black"]:hover,
+button[class*="dark:bg-white"]:hover {
+    opacity: 0.85;
+}
+
+#sidebar-workspace-button,
+a[href="/workspace"] {
+    display: none !important;
+}
+
+.gpthub-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(227, 6, 17, 0.10);
+    border: 1px solid var(--mts-red-border);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: #ff6b6b;
+    margin-bottom: 10px;
+    max-width: fit-content;
+    line-height: 1.4;
+    letter-spacing: 0.2px;
+}
+
+.gpthub-indicator::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--mts-red);
+    flex-shrink: 0;
+}
+
+.gpthub-tts {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--mts-tts-size);
+    height: var(--mts-tts-size);
+    border-radius: 4px;
+    border: 1px solid var(--mts-border);
+    background: transparent;
+    cursor: pointer;
+    color: var(--mts-text-muted);
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    flex-shrink: 0;
+    padding: 0;
+}
+
+.gpthub-tts:hover {
+    color: var(--mts-red);
+    border-color: var(--mts-red);
+    background: var(--mts-red-subtle);
+}
+
+.gpthub-tts.active {
+    color: var(--mts-red);
+    border-color: var(--mts-red);
+    background: var(--mts-red-subtle);
+    animation: mts-pulse 1.5s infinite;
+}
+
+@keyframes mts-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}

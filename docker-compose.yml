@@ -1,0 +1,469 @@
+name: ${COMPOSE_PROJECT_NAME}
+
+services:
+  traefik:
+    image: traefik:v3.2
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./traefik/traefik.yml:/etc/traefik/traefik.yml:ro"
+    networks:
+      - app
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./backend
+    command: alembic upgrade head
+    environment:
+      POSTGRES_DSN: ${POSTGRES_DSN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      BACKEND_HOST: ${BACKEND_HOST}
+      BACKEND_RELOAD: ${BACKEND_RELOAD}
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      MWS_GPT_BASE_URL: ${MWS_GPT_BASE_URL}
+      MWS_GPT_API_KEY: ${MWS_GPT_API_KEY}
+      DEFAULT_TEXT_MODEL: ${DEFAULT_TEXT_MODEL}
+      FALLBACK_TEXT_MODEL: ${FALLBACK_TEXT_MODEL}
+      VISION_MODEL: ${VISION_MODEL}
+      VISION_FALLBACK_MODEL: ${VISION_FALLBACK_MODEL}
+      ASR_MODEL: ${ASR_MODEL}
+      IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL}
+      IMAGE_GENERATION_FALLBACK_MODEL: ${IMAGE_GENERATION_FALLBACK_MODEL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      TTS_MODEL: ${TTS_MODEL}
+      QDRANT_URL: ${QDRANT_URL}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_HOST: http://langfuse:3000
+    ports:
+      - "${BACKEND_PORT}:8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=PathPrefix(`/v1`) || PathPrefix(`/health`)"
+      - "traefik.http.routers.backend.entrypoints=web"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.average=200"
+      - "traefik.http.middlewares.api-ratelimit.ratelimit.burst=100"
+      - "traefik.http.routers.backend.middlewares=api-ratelimit"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      minio:
+        condition: service_started
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  worker-high:
+    build:
+      context: ./backend
+    command: celery -A app.tasks.celery_app.celery_app worker -Q high -c 4 -l info
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      MWS_GPT_BASE_URL: ${MWS_GPT_BASE_URL}
+      MWS_GPT_API_KEY: ${MWS_GPT_API_KEY}
+      ASR_MODEL: ${ASR_MODEL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app
+
+  worker-low:
+    build:
+      context: ./backend
+    command: celery -A app.tasks.celery_app.celery_app worker -Q low -c 2 -l info
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      MWS_GPT_BASE_URL: ${MWS_GPT_BASE_URL}
+      MWS_GPT_API_KEY: ${MWS_GPT_API_KEY}
+      DEFAULT_TEXT_MODEL: ${DEFAULT_TEXT_MODEL}
+      IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL}
+      IMAGE_GENERATION_FALLBACK_MODEL: ${IMAGE_GENERATION_FALLBACK_MODEL}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      POSTGRES_DSN: ${POSTGRES_DSN}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app
+
+  flower:
+    build:
+      context: ./backend
+    command: celery -A app.tasks.celery_app.celery_app flower --port=5555
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+    ports:
+      - "5555:5555"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - app
+
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main
+    volumes:
+      - ./frontend/pipelines:/app/pipelines
+    ports:
+      - "9099:9099"
+    networks:
+      - app
+
+  openwebui:
+    build:
+      context: ./frontend/openwebui-builder
+      args:
+        OPENWEBUI_GIT_REPO: ${OPENWEBUI_GIT_REPO}
+        OPENWEBUI_GIT_REF: ${OPENWEBUI_GIT_REF}
+        OPENWEBUI_BASE_IMAGE: ${OPENWEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+        VITE_GPTHUB_VISION_MODELS: ${VISION_MODEL},${VISION_FALLBACK_MODEL}
+        VITE_GPTHUB_AUDIO_MODELS: ${ASR_MODEL}
+    image: gpthub-openwebui:local
+    environment:
+      OPENAI_API_BASE_URL: ${OPENWEBUI_API_BASE_URL}
+      OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      WEBUI_NAME: GPTHub
+      WEBUI_URL: http://localhost
+      DEFAULT_MODELS: ${DEFAULT_TEXT_MODEL}
+      ENABLE_SIGNUP: "${ENABLE_SIGNUP:-true}"
+      SHOW_CHANGELOG: "false"
+      ENABLE_COMMUNITY_SHARING: "false"
+      ENABLE_MESSAGE_RATING: "false"
+      ENABLE_NOTES: "false"
+      ENABLE_USER_STATUS: "false"
+      ENABLE_PUBLIC_ACTIVE_USERS_COUNT: "false"
+      ENABLE_VERSION_UPDATE_CHECK: "false"
+      ENABLE_TAGS_GENERATION: "false"
+      ENABLE_FOLDERS: "false"
+      USER_PERMISSIONS_FEATURES_NOTES: "false"
+      USER_PERMISSIONS_FEATURES_FOLDERS: "false"
+      USER_PERMISSIONS_CHAT_RATE_RESPONSE: "false"
+      USER_PERMISSIONS_CHAT_SHARE: "false"
+      USER_PERMISSIONS_CHAT_CONTROLS: "false"
+      USER_PERMISSIONS_CHAT_WEB_UPLOAD: "false"
+      USER_PERMISSIONS_CHAT_TEMPORARY: "false"
+      USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS: "false"
+      USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ACCESS: "false"
+      USER_PERMISSIONS_WORKSPACE_PROMPTS_ACCESS: "false"
+      USER_PERMISSIONS_WORKSPACE_TOOLS_ACCESS: "false"
+      USER_PERMISSIONS_WORKSPACE_SKILLS_ACCESS: "false"
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      FORWARD_USER_INFO_HEADER_USER_ID: X-User-Id
+      DEFAULT_LOCALE: ru-RU
+      AUDIO_STT_ENGINE: openai
+      AUDIO_STT_OPENAI_API_BASE_URL: http://backend:8000/v1
+      AUDIO_STT_OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
+      AUDIO_TTS_ENGINE: openai
+      AUDIO_TTS_OPENAI_API_BASE_URL: http://backend:8000/v1
+      AUDIO_TTS_OPENAI_API_KEY: ${OPENWEBUI_API_KEY}
+      PIPELINES_URLS: http://pipelines:9099
+    volumes:
+      - openwebui-data:/app/backend/data
+    depends_on:
+      backend:
+        condition: service_healthy
+      pipelines:
+        condition: service_started
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "${FRONTEND_PORT}:80"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      - "traefik.http.middlewares.frontend-ratelimit.ratelimit.average=300"
+      - "traefik.http.middlewares.frontend-ratelimit.ratelimit.burst=150"
+      - "traefik.http.routers.frontend.middlewares=frontend-ratelimit"
+      - "traefik.http.routers.frontend.priority=1"
+    depends_on:
+      openwebui:
+        condition: service_healthy
+    networks:
+      - app
+
+  owui-init:
+    build:
+      context: ./frontend/init
+    environment:
+      OPENWEBUI_INTERNAL_URL: http://openwebui:8080
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD}
+    volumes:
+      - ./frontend/functions:/tools:ro
+    depends_on:
+      openwebui:
+        condition: service_healthy
+    networks:
+      - app
+    restart: on-failure
+
+  langfuse-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD}
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD}@langfuse-postgres:5432/langfuse
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT}
+      SALT: ${LANGFUSE_SALT}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_USE_AZURE_BLOB: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: ${LANGFUSE_S3_BUCKET}
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: ${LANGFUSE_S3_BUCKET}
+      LANGFUSE_S3_BATCH_EXPORT_PREFIX: exports/
+      LANGFUSE_S3_BATCH_EXPORT_REGION: auto
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: http://localhost:9000
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY}
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY}
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_AUTH: ${LANGFUSE_REDIS_AUTH}
+      REDIS_TLS_ENABLED: "false"
+    depends_on: &langfuse-depends-on
+      langfuse-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - app
+
+  langfuse:
+    image: langfuse/langfuse:3
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET}
+      LANGFUSE_INIT_ORG_ID: gpthub-org
+      LANGFUSE_INIT_ORG_NAME: GPTHub
+      LANGFUSE_INIT_PROJECT_ID: gpthub-project
+      LANGFUSE_INIT_PROJECT_NAME: GPTHub
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_EMAIL}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_PASSWORD}
+      LANGFUSE_INIT_USER_NAME: admin
+    ports:
+      - "${LANGFUSE_PORT}:3000"
+    depends_on: *langfuse-depends-on
+    networks:
+      - app
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    networks:
+      - app
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - app
+
+  minio:
+    image: minio/minio:latest
+    entrypoint: sh
+    command: -c "mkdir -p /data/${MINIO_BUCKET} /data/${LANGFUSE_S3_BUCKET} && minio server /data --console-address ':9001'"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    networks:
+      - app
+
+  clickhouse:
+    image: clickhouse/clickhouse-server
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT}:8123"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    networks:
+      - app
+
+volumes:
+  openwebui-data:
+  postgres-data:
+  redis-data:
+  rabbitmq-data:
+  qdrant-data:
+  minio-data:
+  langfuse-postgres-data:
+  clickhouse-data:
+  clickhouse-logs:
+
+networks:
+  app:
+    name: gpthub_net
+    driver: bridge

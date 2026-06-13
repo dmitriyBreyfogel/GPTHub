@@ -1,0 +1,17 @@
+api:
+  dashboard: true
+  insecure: true
+
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: gpthub_net
+
+log:
+  level: INFO
+
+accessLog: {}

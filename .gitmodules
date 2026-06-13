@@ -1,0 +1,3 @@
+[submodule "frontend/openwebui"]
+	path = frontend/openwebui
+	url = https://github.com/anryisreal/open-webui.git
